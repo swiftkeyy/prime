@@ -171,9 +171,9 @@ def _syllable_word(length: int) -> str:
 def _word_like(length: int) -> str:
     bank = [item for item in WORD_BANK.get(length, []) if item not in COMMON_TAKEN_5]
     if length == 5:
-        # 5-letter dictionary words are almost always dead. Use procedural brands more often.
-        if bank and random.random() < 0.16:
-            return random.choice(bank)
+        # Real 5-letter words are usually reserved/collectible or already taken.
+        # Use generated brand-like pseudo-words instead of showing fake hopes like
+        # sever/kvant/novak that Telegram refuses in the username screen.
         return _five_letter_brand()
 
     if bank and random.random() < 0.82:
