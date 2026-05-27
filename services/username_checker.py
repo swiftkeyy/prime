@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from redis.asyncio import Redis
@@ -22,7 +24,7 @@ class UsernameCheckerNotConfigured(UsernameCheckError):
 
 
 class UsernameCheckerRateLimited(UsernameCheckError):
-    """Telegram temporarily rate-limited username checks."""
+    """Telegram temporarily rate-limited all available checker accounts."""
 
     def __init__(self, retry_after: int = 0) -> None:
         self.retry_after = max(0, int(retry_after or 0))
@@ -36,6 +38,9 @@ class UsernameCheckerAdapter(Protocol):
 class MockUsernameChecker:
     async def start(self) -> None:
         logger.warning("USERNAME_CHECK_MODE=mock is enabled. Use only for local tests.")
+
+    async def close(self) -> None:
+        return None
 
     async def is_available(self, username: str) -> bool:
         await asyncio.sleep(0.05)
@@ -51,26 +56,12 @@ class FailClosedUsernameChecker:
     async def start(self) -> None:
         logger.error("Username checker is disabled: %s", self.reason)
 
+    async def close(self) -> None:
+        return None
+
     async def is_available(self, username: str) -> bool:
         logger.error("Username check refused for @%s: %s", username, self.reason)
         raise UsernameCheckerNotConfigured(self.reason)
-
-
-class RateLimiterMixin:
-    def __init__(self, delay_seconds: float) -> None:
-        # account.checkUsername is strict but very sensitive. Keep a real pause,
-        # otherwise Telegram gives huge flood waits and the bot becomes useless.
-        self.delay_seconds = max(3.0, float(delay_seconds))
-        self._lock = asyncio.Lock()
-        self._last_request = 0.0
-
-    async def _rate_limit(self) -> None:
-        async with self._lock:
-            now = asyncio.get_event_loop().time()
-            delay = self.delay_seconds - (now - self._last_request)
-            if delay > 0:
-                await asyncio.sleep(delay)
-            self._last_request = asyncio.get_event_loop().time()
 
 
 KNOWN_BAD_USERNAMES = {
@@ -86,19 +77,182 @@ KNOWN_BAD_USERNAMES = {
 }
 
 
-class MTProtoStrictUsernameChecker(RateLimiterMixin):
-    """Strict Telegram checker that does not use resolveUsername live-scans.
+@dataclass
+class MTProtoAccountSlot:
+    index: int
+    string_session: str
+    api_id: int
+    api_hash: str
+    timeout: int
+    delay_seconds: float
+    max_cooldown_seconds: int
+    client: object | None = None
+    started: bool = False
+    disabled: bool = False
+    own_username: str | None = None
+    cooldown_until: float = 0.0
+    last_request: float = 0.0
+    start_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    Why this version exists:
-    - contacts.resolveUsername also gets huge FloodWait when spammed;
-    - resolveUsername only answers whether username is assigned, not whether it
-      is settable on account;
-    - account.checkUsername is the only strict check, but it must be called very
-      slowly and in small amounts.
+    def now(self) -> float:
+        return asyncio.get_event_loop().time()
 
-    This checker therefore uses only account.checkUsername, throttles every call,
-    and raises UsernameCheckerRateLimited immediately on FloodWait so handlers do
-    not burn through 30 candidates and do not show fake "not found" messages.
+    def retry_after(self) -> int:
+        return max(0, int(self.cooldown_until - self.now()))
+
+    def is_cooling_down(self) -> bool:
+        return self.retry_after() > 0
+
+    async def start(self) -> None:
+        async with self.start_lock:
+            if self.started or self.disabled:
+                return
+
+            try:
+                from telethon import TelegramClient
+                from telethon.sessions import StringSession
+            except ImportError as exc:
+                self.disabled = True
+                raise UsernameCheckerNotConfigured("telethon is not installed. Add telethon to requirements.txt") from exc
+
+            try:
+                self.client = TelegramClient(
+                    StringSession(self.string_session.strip()),
+                    self.api_id,
+                    self.api_hash,
+                    sequential_updates=True,
+                    connection_retries=2,
+                    request_retries=0,
+                    timeout=self.timeout,
+                    flood_sleep_threshold=0,
+                )
+                await self.client.connect()  # type: ignore[union-attr]
+                if not await self.client.is_user_authorized():  # type: ignore[union-attr]
+                    raise UsernameCheckerNotConfigured("session is not authorized")
+                me = await self.client.get_me()  # type: ignore[union-attr]
+                self.own_username = (getattr(me, "username", None) or "").lower() or None
+                self.started = True
+                logger.info("MTProto pool account #%s connected own_username=%s", self.index, self.own_username or "none")
+            except Exception as exc:
+                self.disabled = True
+                logger.error("MTProto pool account #%s disabled: %s: %s", self.index, exc.__class__.__name__, str(exc)[:180])
+                try:
+                    if self.client is not None:
+                        await self.client.disconnect()  # type: ignore[union-attr]
+                except Exception:
+                    pass
+                self.client = None
+                raise
+
+    async def close(self) -> None:
+        if self.client is not None:
+            try:
+                await self.client.disconnect()  # type: ignore[union-attr]
+            except Exception as exc:
+                logger.warning("MTProto pool account #%s disconnect failed: %s", self.index, exc.__class__.__name__)
+        self.started = False
+
+    async def _sleep_for_rate_limit(self) -> None:
+        now = self.now()
+        wait_for = self.delay_seconds - (now - self.last_request)
+        if wait_for > 0:
+            await asyncio.sleep(wait_for)
+        self.last_request = self.now()
+
+    def _put_on_cooldown(self, seconds: int) -> None:
+        seconds = max(1, int(seconds or 1))
+        cooldown = min(seconds, self.max_cooldown_seconds)
+        self.cooldown_until = self.now() + cooldown
+        logger.warning(
+            "MTProto account #%s cooldown: telegram_retry_after=%s local_cooldown=%s",
+            self.index,
+            seconds,
+            cooldown,
+        )
+
+    async def check_username(self, username: str) -> bool:
+        if self.disabled:
+            raise UsernameCheckerNotConfigured(f"MTProto account #{self.index} is disabled")
+        if not self.started:
+            await self.start()
+        if self.is_cooling_down():
+            raise UsernameCheckerRateLimited(self.retry_after())
+        if self.own_username and username == self.own_username:
+            logger.info("MTProto pool account #%s @%s -> own username, skip", self.index, username)
+            return False
+
+        async with self.request_lock:
+            if self.is_cooling_down():
+                raise UsernameCheckerRateLimited(self.retry_after())
+            await self._sleep_for_rate_limit()
+
+            try:
+                from telethon.errors import FloodWaitError, RPCError
+                from telethon.errors.rpcerrorlist import UsernameInvalidError, UsernameOccupiedError
+                from telethon.tl.functions.account import CheckUsernameRequest
+            except ImportError as exc:
+                raise UsernameCheckerNotConfigured("telethon import error") from exc
+
+            try:
+                result = await asyncio.wait_for(
+                    self.client(CheckUsernameRequest(username), flood_sleep_threshold=0),  # type: ignore[misc,operator]
+                    timeout=self.timeout,
+                )
+                allowed = bool(result)
+                logger.info(
+                    "MTProto pool account #%s account.checkUsername @%s -> %s",
+                    self.index,
+                    username,
+                    "settable" if allowed else "not settable",
+                )
+                return allowed
+
+            except (UsernameInvalidError, UsernameOccupiedError):
+                logger.info("MTProto pool account #%s account.checkUsername @%s -> invalid/occupied", self.index, username)
+                return False
+
+            except FloodWaitError as exc:
+                seconds = int(getattr(exc, "seconds", 0) or 0)
+                self._put_on_cooldown(seconds)
+                raise UsernameCheckerRateLimited(seconds)
+
+            except asyncio.TimeoutError:
+                logger.warning("MTProto pool account #%s checkUsername timeout @%s; candidate rejected", self.index, username)
+                return False
+
+            except RPCError as exc:
+                msg = f"{exc.__class__.__name__} {str(exc)}".lower()
+                blocked_markers = (
+                    "username_invalid", "username_occupied", "username_purchase_available",
+                    "purchase_available", "username_not_available", "not available",
+                    "occupied", "invalid", "premium", "collectible", "reserved", "auction",
+                )
+                if any(marker in msg for marker in blocked_markers):
+                    logger.info("MTProto pool account #%s checkUsername @%s -> blocked: %s", self.index, username, exc.__class__.__name__)
+                    return False
+                logger.warning("MTProto pool account #%s RPC error @%s: %s", self.index, username, msg[:180])
+                return False
+
+            except Exception as exc:
+                logger.warning(
+                    "MTProto pool account #%s unexpected error @%s: %s: %s",
+                    self.index,
+                    username,
+                    exc.__class__.__name__,
+                    str(exc)[:180],
+                )
+                return False
+
+
+class MTProtoAccountPoolUsernameChecker:
+    """Strict username checker with a pool of MTProto accounts.
+
+    One Telegram account cannot handle production scanning: account.checkUsername
+    is heavily rate-limited. This pool lets the owner add several StringSessions
+    once and the bot will rotate them automatically. Flooded sessions are put on
+    cooldown; the bot never falls back to Fragment/BotAPI and never returns
+    unchecked usernames.
     """
 
     def __init__(
@@ -106,170 +260,163 @@ class MTProtoStrictUsernameChecker(RateLimiterMixin):
         *,
         api_id: int,
         api_hash: str,
-        string_session: str,
-        timeout: int = 7,
-        delay_seconds: float = 3.0,
+        string_sessions: list[str],
+        timeout: int,
+        delay_seconds: float,
+        max_cooldown_seconds: int,
     ) -> None:
-        super().__init__(delay_seconds=delay_seconds)
+        if not api_id or not api_hash or not string_sessions:
+            raise UsernameCheckerNotConfigured(
+                "MTProto credentials are missing. Set TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_STRING_SESSIONS."
+            )
         self.api_id = int(api_id)
         self.api_hash = api_hash.strip()
-        self.string_session = string_session.strip()
         self.timeout = int(timeout)
-        self._client = None
-        self._started = False
+        self.delay_seconds = max(1.5, float(delay_seconds))
+        self.max_cooldown_seconds = max(60, int(max_cooldown_seconds))
+        self.slots = [
+            MTProtoAccountSlot(
+                index=index + 1,
+                string_session=session,
+                api_id=self.api_id,
+                api_hash=self.api_hash,
+                timeout=self.timeout,
+                delay_seconds=self.delay_seconds,
+                max_cooldown_seconds=self.max_cooldown_seconds,
+            )
+            for index, session in enumerate(string_sessions)
+        ]
         self._start_lock = asyncio.Lock()
-        self._own_username: str | None = None
-        self._strict_flood_until = 0.0
-        self._strict_retry_after = 0
+        self._rr_lock = asyncio.Lock()
+        self._rr_index = 0
+        self._started = False
 
     async def start(self) -> None:
         async with self._start_lock:
             if self._started:
                 return
 
-            if not self.api_id or not self.api_hash or not self.string_session:
+            ok = 0
+            for slot in self.slots:
+                try:
+                    await slot.start()
+                    ok += 1
+                except Exception:
+                    continue
+
+            if ok <= 0:
                 raise UsernameCheckerNotConfigured(
-                    "MTProto credentials are missing. Set TELEGRAM_API_ID, "
-                    "TELEGRAM_API_HASH and TELEGRAM_STRING_SESSION in Railway Variables."
+                    "No MTProto accounts connected. Regenerate sessions with scripts/create_telethon_session.py"
                 )
 
-            try:
-                from telethon import TelegramClient
-                from telethon.sessions import StringSession
-            except ImportError as exc:
-                raise UsernameCheckerNotConfigured("telethon is not installed. Add telethon to requirements.txt") from exc
-
-            self._client = TelegramClient(
-                StringSession(self.string_session),
-                self.api_id,
-                self.api_hash,
-                sequential_updates=True,
-                connection_retries=2,
-                request_retries=0,
-                timeout=self.timeout,
-                flood_sleep_threshold=0,
-            )
-            await self._client.connect()
-            if not await self._client.is_user_authorized():
-                raise UsernameCheckerNotConfigured(
-                    "TELEGRAM_STRING_SESSION is invalid or expired. "
-                    "Regenerate it with scripts/create_telethon_session.py"
-                )
-            me = await self._client.get_me()
-            self._own_username = (getattr(me, "username", None) or "").lower() or None
             self._started = True
-            logger.info("MTProto strict-only username checker connected own_username=%s", self._own_username or "none")
+            logger.info("MTProto username checker pool ready: %s/%s accounts connected", ok, len(self.slots))
 
     async def close(self) -> None:
-        if self._client is not None:
-            await self._client.disconnect()
+        for slot in self.slots:
+            await slot.close()
         self._started = False
-        logger.info("MTProto username checker disconnected")
+        logger.info("MTProto username checker pool disconnected")
 
     async def _ensure_started(self) -> None:
         if not self._started:
             await self.start()
+
+    async def _pick_slot(self) -> MTProtoAccountSlot | None:
+        async with self._rr_lock:
+            active_slots = [slot for slot in self.slots if not slot.disabled and slot.started]
+            if not active_slots:
+                return None
+
+            n = len(active_slots)
+            start = self._rr_index % n
+
+            # Prefer accounts not currently cooling down and not already busy.
+            for prefer_free_lock in (True, False):
+                for offset in range(n):
+                    idx = (start + offset) % n
+                    slot = active_slots[idx]
+                    if slot.is_cooling_down():
+                        continue
+                    if prefer_free_lock and slot.request_lock.locked():
+                        continue
+                    self._rr_index = idx + 1
+                    return slot
+            return None
+
+    def _min_retry_after(self) -> int:
+        retries = [slot.retry_after() for slot in self.slots if not slot.disabled and slot.retry_after() > 0]
+        return min(retries) if retries else 60
 
     async def is_available(self, username: str) -> bool:
         username = username.lower().lstrip("@")
         if not is_valid_username(username):
             return False
         if username in KNOWN_BAD_USERNAMES:
-            logger.info("MTProto checkUsername @%s -> blocked by local known-bad list", username)
+            logger.info("MTProto pool @%s -> blocked by local known-bad list", username)
             return False
 
         await self._ensure_started()
 
-        if self._own_username and username == self._own_username:
-            logger.info("MTProto checkUsername @%s -> own username, skip", username)
-            return False
+        last_rate_limit: UsernameCheckerRateLimited | None = None
+        attempts = max(1, len(self.slots))
+        for _ in range(attempts):
+            slot = await self._pick_slot()
+            if slot is None:
+                break
+            try:
+                return await slot.check_username(username)
+            except UsernameCheckerRateLimited as exc:
+                last_rate_limit = exc
+                continue
+            except UsernameCheckerNotConfigured:
+                continue
 
-        now = asyncio.get_event_loop().time()
-        if now < self._strict_flood_until:
-            retry_after = max(1, int(self._strict_flood_until - now))
-            logger.warning("MTProto strict cooldown active, stop search; retry_after=%s sec", retry_after)
-            raise UsernameCheckerRateLimited(retry_after)
-
-        await self._rate_limit()
-
-        try:
-            from telethon.errors import FloodWaitError, RPCError
-            from telethon.errors.rpcerrorlist import UsernameInvalidError, UsernameOccupiedError
-            from telethon.tl.functions.account import CheckUsernameRequest
-        except ImportError as exc:
-            raise UsernameCheckerNotConfigured("telethon import error") from exc
-
-        try:
-            result = await asyncio.wait_for(
-                self._client(CheckUsernameRequest(username), flood_sleep_threshold=0),  # type: ignore[misc]
-                timeout=self.timeout,
-            )
-            allowed = bool(result)
-            logger.info("MTProto account.checkUsername @%s -> %s", username, "settable" if allowed else "not settable")
-            return allowed
-
-        except (UsernameInvalidError, UsernameOccupiedError):
-            logger.info("MTProto account.checkUsername @%s -> invalid/occupied", username)
-            return False
-
-        except FloodWaitError as exc:
-            seconds = int(getattr(exc, "seconds", 0) or 0)
-            # Keep local cooldown bounded for UX, but the Telegram account may be
-            # locked longer. User should generate a fresh session or wait.
-            cooldown = min(max(seconds, 60), 3600)
-            self._strict_retry_after = seconds
-            self._strict_flood_until = asyncio.get_event_loop().time() + cooldown
-            logger.warning(
-                "MTProto account.checkUsername flood wait @%s: %s sec; local cooldown=%s sec",
-                username,
-                seconds,
-                cooldown,
-            )
-            raise UsernameCheckerRateLimited(seconds)
-
-        except asyncio.TimeoutError:
-            logger.warning("MTProto account.checkUsername timeout for @%s; candidate rejected", username)
-            return False
-
-        except RPCError as exc:
-            msg = f"{exc.__class__.__name__} {str(exc)}".lower()
-            blocked_markers = (
-                "username_invalid", "username_occupied", "username_purchase_available",
-                "purchase_available", "username_not_available", "not available",
-                "occupied", "invalid", "premium", "collectible", "reserved", "auction",
-            )
-            if any(marker in msg for marker in blocked_markers):
-                logger.info("MTProto account.checkUsername @%s -> blocked: %s", username, exc.__class__.__name__)
-                return False
-            logger.warning("MTProto account.checkUsername RPC error @%s: %s", username, msg[:180])
-            return False
-
-        except Exception as exc:
-            logger.warning("MTProto account.checkUsername unexpected error @%s: %s: %s", username, exc.__class__.__name__, str(exc)[:180])
-            return False
+        retry_after = last_rate_limit.retry_after if last_rate_limit else self._min_retry_after()
+        logger.warning("MTProto pool exhausted; all accounts are cooling down retry_after=%s", retry_after)
+        raise UsernameCheckerRateLimited(retry_after)
 
 
 # Backwards-compatible names from earlier builds.
-MTProtoResolveUsernameChecker = MTProtoStrictUsernameChecker
-MTProtoSettableUsernameChecker = MTProtoStrictUsernameChecker
+MTProtoStrictUsernameChecker = MTProtoAccountPoolUsernameChecker
+MTProtoResolveUsernameChecker = MTProtoAccountPoolUsernameChecker
+MTProtoSettableUsernameChecker = MTProtoAccountPoolUsernameChecker
+
+
+def _parse_mtproto_sessions(settings: Settings) -> list[str]:
+    raw = getattr(settings, "TELEGRAM_STRING_SESSIONS", "") or ""
+    if not raw.strip():
+        raw = getattr(settings, "TELEGRAM_STRING_SESSION", "") or ""
+    # Railway can store this as one line separated by comma/semicolon or as a multiline variable.
+    parts = re.split(r"[\n;,]+", raw)
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        session = part.strip().strip('"').strip("'")
+        if session and session not in seen:
+            result.append(session)
+            seen.add(session)
+    return result
 
 
 def _has_mtproto_credentials(settings: Settings) -> bool:
-    return bool(settings.TELEGRAM_API_ID and settings.TELEGRAM_API_HASH and settings.TELEGRAM_STRING_SESSION)
+    return bool(settings.TELEGRAM_API_ID and settings.TELEGRAM_API_HASH and _parse_mtproto_sessions(settings))
 
 
-def _build_mtproto_checker(settings: Settings) -> MTProtoStrictUsernameChecker:
+def _build_mtproto_checker(settings: Settings) -> MTProtoAccountPoolUsernameChecker:
+    sessions = _parse_mtproto_sessions(settings)
     if not _has_mtproto_credentials(settings):
         raise UsernameCheckerNotConfigured(
             "MTProto credentials are missing. Set USERNAME_CHECK_MODE=mtproto, "
-            "TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_STRING_SESSION."
+            "TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_STRING_SESSIONS."
         )
-    return MTProtoStrictUsernameChecker(
+    return MTProtoAccountPoolUsernameChecker(
         api_id=settings.TELEGRAM_API_ID,
         api_hash=settings.TELEGRAM_API_HASH,
-        string_session=settings.TELEGRAM_STRING_SESSION,
+        string_sessions=sessions,
         timeout=settings.USERNAME_CHECK_TIMEOUT,
         delay_seconds=settings.MTPROTO_CHECK_DELAY_SECONDS,
+        max_cooldown_seconds=getattr(settings, "MTPROTO_SESSION_MAX_COOLDOWN_SECONDS", 86400),
     )
 
 
@@ -281,12 +428,13 @@ def build_checker(settings: Settings) -> UsernameCheckerAdapter:
         return MockUsernameChecker()
 
     if _has_mtproto_credentials(settings):
-        logger.info("Using MTProto strict-only account.checkUsername checker")
+        sessions_count = len(_parse_mtproto_sessions(settings))
+        logger.info("Using MTProto username checker pool: %s configured account(s)", sessions_count)
         return _build_mtproto_checker(settings)
 
     reason = (
         "Strict username checking is not configured. Set TELEGRAM_API_ID, "
-        "TELEGRAM_API_HASH and TELEGRAM_STRING_SESSION in Railway Variables. "
+        "TELEGRAM_API_HASH and TELEGRAM_STRING_SESSIONS in Railway Variables. "
         "Fragment/t.me/BotAPI checking is disabled because it returns false positives."
     )
     return FailClosedUsernameChecker(reason)
@@ -304,8 +452,8 @@ async def is_username_available(
     if not is_valid_username(username):
         return False
 
-    # v11 switches to strict-only account.checkUsername and drops resolve cache.
-    cache_key = f"prime_nick:username:v11:{username}"
+    # v12 introduces MTProto account pool. Do not reuse old false-positive cache.
+    cache_key = f"prime_nick:username:v12:{username}"
     if redis:
         cached = await redis.get(cache_key)
         if cached is not None:

@@ -56,7 +56,7 @@ NOT_FOUND = """⏳ <b>Ничего подходящего</b>
 CHECK_UNAVAILABLE = """⚠️ <b>Проверка сейчас недоступна</b>
 
 Проверка username работает через Telegram MTProto.
-Если ошибка повторяется — проверь TELEGRAM_STRING_SESSION в Railway."""
+Проверь TELEGRAM_API_ID, TELEGRAM_API_HASH и TELEGRAM_STRING_SESSIONS в Railway."""
 
 
 def check_rate_limited(retry_after: int = 0) -> str:
@@ -67,14 +67,14 @@ def check_rate_limited(retry_after: int = 0) -> str:
         hours = max(1, retry_after // 3600)
         wait = f"примерно {hours} ч."
     else:
-        wait = "позже"
+        wait = "немного позже"
 
     return f"""⏳ <b>Telegram ограничил проверку</b>
 
 Бот не будет выдавать непроверенные username.
-Текущая MTProto-сессия получила лимит Telegram.
+Все доступные MTProto-аккаунты сейчас получили лимит Telegram.
 
-Повтори поиск {wait} или создай новую TELEGRAM_STRING_SESSION в Railway."""
+Повтори поиск {wait}. Для продакшена добавь несколько сессий в TELEGRAM_STRING_SESSIONS — бот будет сам переключаться между ними."""
 
 UNKNOWN_ERROR = """⚠️ <b>Что-то пошло не так</b>
 

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from config import Settings
-from services.username_checker import build_checker, is_username_available
+from services.username_checker import UsernameCheckerRateLimited, build_checker, is_username_available
 
 
 async def main() -> None:
@@ -28,8 +28,11 @@ async def main() -> None:
 
     try:
         for username in usernames:
-            result = await is_username_available(username, checker=checker, redis=None)
-            print(f"@{username}: {'FREE / NOT OCCUPIED' if result else 'BUSY / NOT USABLE'}")
+            try:
+                result = await is_username_available(username, checker=checker, redis=None)
+                print(f"@{username}: {'FREE / SETTABLE' if result else 'BUSY / NOT USABLE'}")
+            except UsernameCheckerRateLimited as exc:
+                print(f"@{username}: RATE LIMITED, retry_after={exc.retry_after}s")
     finally:
         if close:
             await close()
