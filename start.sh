@@ -1,5 +1,8 @@
 #!/bin/sh
 set -e
 
+echo "Running database migrations..."
 alembic upgrade head
-python main.py
+
+echo "Starting PRIME NICK..."
+exec python main.py
