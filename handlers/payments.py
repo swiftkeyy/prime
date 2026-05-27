@@ -37,7 +37,7 @@ async def choose_tariff(
     payment = await create_robokassa_payment(session, current_user, settings, tariff)
     url = build_payment_url(settings, payment)
     await callback.message.edit_text(
-        robokassa_invoice(tariff, settings.rub_price(tariff)),
+        robokassa_invoice(tariff, int(payment.amount)),
         reply_markup=robokassa_pay(url, tariff),
     )
     await callback.answer()

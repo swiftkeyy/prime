@@ -42,6 +42,8 @@ from keyboards.admin import (
     broadcast_audience_kb,
     broadcast_confirm,
     payments_menu,
+    price_method_kb,
+    prices_menu,
     prime_control_kb,
     promo_list_kb,
     promo_menu,
@@ -52,6 +54,16 @@ from keyboards.admin import (
     users_page_kb,
 )
 from services.prime_access import grant_prime, revoke_prime
+from services.pricing import (
+    METHOD_CURRENCIES,
+    METHOD_TITLES,
+    TARIFFS,
+    get_prime_price_views,
+    get_prime_prices,
+    parse_price,
+    price_key,
+    set_prime_price,
+)
 from utils.formatters import h, money_rub, tariff_title
 from utils.time import format_dt, utcnow
 from utils.validators import normalize_promo
@@ -69,6 +81,7 @@ class AdminStates(StatesGroup):
     waiting_broadcast = State()
     preview_broadcast = State()
     waiting_setting = State()
+    waiting_price = State()
 
 
 def is_admin(user_id: int, settings: Settings) -> bool:
@@ -137,6 +150,35 @@ def user_card_text(user: User) -> str:
 │ Цифры: <b>{'ON' if user.digits_enabled else 'OFF'}</b>
 │ Underscore: <b>{'ON' if user.underscore_enabled else 'OFF'}</b>
 ╰ Style: <b>{h(user.style_mode)}</b>"""
+
+
+
+def price_amount_text(method: str, amount: int) -> str:
+    return f"{amount} ₽" if method == "robokassa" else f"{amount} ⭐"
+
+
+def price_panel_text(views: list) -> str:
+    lines = ["💰 <b>PRIME PASS · Цены</b>", "", "Меняешь тут — сразу применяется в боте, инвойсах Stars и ссылках Robokassa.", ""]
+    for method in ("robokassa", "stars"):
+        lines.append(f"╭─ <b>{METHOD_TITLES[method]}</b>")
+        for item in [v for v in views if v.method == method]:
+            lines.append(
+                f"│ {tariff_title(item.tariff)}: <b>{price_amount_text(method, item.amount)}</b> "
+                f"<i>({h(item.source)})</i>"
+            )
+        lines.append("╰")
+        lines.append("")
+    lines.append("Выбери способ оплаты ниже и нажми тариф, который нужно изменить.")
+    return "\n".join(lines).strip()
+
+
+def price_method_text(method: str, prices: dict[str, int]) -> str:
+    lines = [f"💰 <b>{METHOD_TITLES[method]}</b>", "", "Текущие цены PRIME PASS:", ""]
+    for tariff in TARIFFS:
+        lines.append(f"• {tariff_title(tariff)} — <b>{price_amount_text(method, prices[tariff])}</b>")
+    lines.append("")
+    lines.append("Нажми тариф, чтобы поменять цену.")
+    return "\n".join(lines)
 
 
 def format_payment_amount(amount: Any, currency: str) -> str:
@@ -696,6 +738,78 @@ async def send_broadcast(callback: CallbackQuery, state: FSMContext, session: As
         reply_markup=admin_back(),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin:prices")
+async def admin_prices(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    views = await get_prime_price_views(session, settings)
+    await safe_edit(callback, price_panel_text(views), prices_menu())
+
+
+@router.callback_query(F.data.regexp(r"^admin:prices:(robokassa|stars)$"))
+async def admin_prices_method(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    method = callback.data.split(":")[-1]
+    prices = await get_prime_prices(session, settings, method)
+    await safe_edit(callback, price_method_text(method, prices), price_method_kb(method))
+
+
+@router.callback_query(F.data.regexp(r"^admin:price:set:(robokassa|stars):(1d|7d|30d|forever)$"))
+async def admin_price_set_prompt(callback: CallbackQuery, state: FSMContext, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    _, _, _, method, tariff = callback.data.split(":")
+    current_price = await get_prime_prices(session, settings, method)
+    await state.set_state(AdminStates.waiting_price)
+    await state.update_data(method=method, tariff=tariff)
+    text = (
+        f"✏️ <b>Изменить цену PRIME PASS</b>\n\n"
+        f"Способ: <b>{METHOD_TITLES[method]}</b>\n"
+        f"Тариф: <b>{tariff_title(tariff)}</b>\n"
+        f"Текущая цена: <b>{price_amount_text(method, current_price[tariff])}</b>\n\n"
+        f"Отправь новую цену одним числом.\n"
+        f"Например: <code>299</code>"
+    )
+    await safe_edit(callback, text, admin_back())
+
+
+@router.message(AdminStates.waiting_price, F.text, ~F.text.startswith("/"))
+async def admin_price_set_save(message: Message, state: FSMContext, session: AsyncSession, settings: Settings) -> None:
+    if await deny(message, settings):
+        return
+    data = await state.get_data()
+    method = data.get("method")
+    tariff = data.get("tariff")
+    if method not in {"robokassa", "stars"} or tariff not in set(TARIFFS):
+        await state.clear()
+        await message.answer("⛔ Контекст цены потерян. Открой админку и попробуй ещё раз.", reply_markup=prices_menu())
+        return
+    try:
+        amount = parse_price(message.text or "")
+    except ValueError:
+        await message.answer("⛔ Цена должна быть целым положительным числом. Пример: <code>299</code>", reply_markup=admin_back())
+        return
+    item = await set_prime_price(session, method, tariff, amount)
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Цена обновлена</b>\n\n"
+        f"Способ: <b>{METHOD_TITLES[method]}</b>\n"
+        f"Тариф: <b>{tariff_title(tariff)}</b>\n"
+        f"Новая цена: <b>{price_amount_text(method, amount)}</b>\n"
+        f"Ключ: <code>{h(item.key)}</code>\n\n"
+        f"Новые пользователи увидят эту цену сразу. Уже созданные счета останутся со старой суммой — это безопасно.",
+        reply_markup=prices_menu(),
+    )
+
+
+@router.message(AdminStates.waiting_price)
+async def admin_price_set_bad_message(message: Message, state: FSMContext, settings: Settings) -> None:
+    if await deny(message, settings):
+        return
+    await message.answer("⛔ Отправь цену числом, например: <code>299</code>", reply_markup=admin_back())
 
 
 @router.callback_query(F.data == "admin:settings")

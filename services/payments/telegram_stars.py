@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import Settings
 from database.models import Payment, User
 from database.queries import create_payment
+from services.pricing import get_prime_price
 from utils.formatters import tariff_title
 
 
@@ -17,7 +18,7 @@ async def create_stars_invoice(
     settings: Settings,
     tariff: str,
 ) -> Payment:
-    amount = settings.stars_price(tariff)
+    amount = await get_prime_price(session, settings, "stars", tariff)
     payment = await create_payment(
         session=session,
         user=user,

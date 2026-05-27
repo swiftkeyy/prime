@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import Settings
 from database.models import Payment, User
 from database.queries import create_payment
+from services.pricing import get_prime_price
 from utils.formatters import tariff_title
 
 ROBOKASSA_URL = "https://auth.robokassa.ru/Merchant/Index.aspx"
@@ -39,7 +40,7 @@ def verify_result_signature(settings: Settings, out_sum: str, inv_id: str, signa
 
 
 async def create_robokassa_payment(session: AsyncSession, user: User, settings: Settings, tariff: str) -> Payment:
-    amount = settings.rub_price(tariff)
+    amount = await get_prime_price(session, settings, "robokassa", tariff)
     return await create_payment(
         session=session,
         user=user,

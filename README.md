@@ -216,3 +216,25 @@ python scripts/create_telethon_session.py
 Введи `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, номер телефона, код Telegram и пароль 2FA, если он включён. Скрипт выведет `TELEGRAM_STRING_SESSION`. Добавь его в Railway Variables.
 
 API ID и API Hash создаются в Telegram на `my.telegram.org`.
+
+## Админка: смена цен PRIME PASS
+
+В админке открой `/admin` → `💰 Цены PRIME`.
+
+Можно менять цены отдельно для:
+
+- `СБП / Robokassa` — рубли;
+- `Telegram Stars` — звёзды.
+
+Цены сохраняются в таблицу `settings` под ключами:
+
+- `PRIME_1_DAY_PRICE_RUB`
+- `PRIME_7_DAYS_PRICE_RUB`
+- `PRIME_30_DAYS_PRICE_RUB`
+- `PRIME_FOREVER_PRICE_RUB`
+- `PRIME_1_DAY_PRICE_STARS`
+- `PRIME_7_DAYS_PRICE_STARS`
+- `PRIME_30_DAYS_PRICE_STARS`
+- `PRIME_FOREVER_PRICE_STARS`
+
+Если runtime-цена удалена или сломана, бот безопасно использует цену из `.env`. Уже созданные счета не меняются: сумма хранится в `payments.amount`, поэтому старые Robokassa/Stars платежи не ломаются.

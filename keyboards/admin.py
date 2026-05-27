@@ -33,11 +33,12 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb.button(text="💠 PRIME Control", callback_data="admin:prime_control")
     kb.button(text="🎟 Промокоды", callback_data="admin:promo")
     kb.button(text="💳 Платежи", callback_data="admin:payments")
+    kb.button(text="💰 Цены PRIME", callback_data="admin:prices")
     kb.button(text="🧬 Поиски", callback_data="admin:searches")
     kb.button(text="📢 Рассылка", callback_data="admin:broadcast")
     kb.button(text="🧩 Runtime", callback_data="admin:settings")
     kb.button(text="↩️ Закрыть", callback_data="main:home")
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -166,6 +167,31 @@ def broadcast_confirm(audience: str = "all") -> InlineKeyboardMarkup:
     kb.button(text="❌ Отмена", callback_data="admin:broadcast:cancel")
     kb.button(text=f"🎯 {BROADCAST_AUDIENCES.get(audience, audience)}", callback_data="admin:broadcast")
     kb.adjust(2, 1)
+    return kb.as_markup()
+
+
+def prices_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💳 RUB / Robokassa", callback_data="admin:prices:robokassa")
+    kb.button(text="⭐ Telegram Stars", callback_data="admin:prices:stars")
+    kb.button(text="📋 Все цены", callback_data="admin:prices")
+    kb.button(text="↩️ Назад", callback_data="admin:menu")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def price_method_kb(method: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    labels = {
+        "1d": "⚡ 24 часа",
+        "7d": "🚀 7 дней",
+        "30d": "💠 30 дней",
+        "forever": "♾ Навсегда",
+    }
+    for tariff, label in labels.items():
+        kb.button(text=f"✏️ {label}", callback_data=f"admin:price:set:{method}:{tariff}")
+    kb.button(text="↩️ К ценам", callback_data="admin:prices")
+    kb.adjust(1)
     return kb.as_markup()
 
 
