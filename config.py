@@ -48,9 +48,13 @@ class Settings(BaseSettings):
     PRIVACY_POLICY_LINK: str = ""
     PRIME_TERMS_LINK: str = ""
 
-    USERNAME_CHECK_MODE: Literal["http", "mock", "fragment"] = "fragment"
+    USERNAME_CHECK_MODE: Literal["http", "mock", "fragment", "mtproto"] = "mtproto"
     USERNAME_CHECK_TIMEOUT: int = 7
     FRAGMENT_CHECK_DELAY_SECONDS: float = 0.8
+    MTPROTO_CHECK_DELAY_SECONDS: float = 0.8
+    TELEGRAM_API_ID: int = 0
+    TELEGRAM_API_HASH: str = ""
+    TELEGRAM_STRING_SESSION: str = ""
     SEARCH_MAX_CANDIDATES: int = 35
     PRIME_SEARCH_MAX_CANDIDATES: int = 70
 

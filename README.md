@@ -178,3 +178,33 @@ Features:
 - `🧩 Runtime Control` — безопасное хранение runtime-флагов в таблице `settings` через `key=value`.
 
 Для Railway используется `start.sh`: сначала `alembic upgrade head`, потом запуск `python main.py` через `exec`, чтобы контейнер оставался Active.
+
+## Строгая проверка username через MTProto
+
+Bot API не умеет надёжно проверять произвольные личные username. Поэтому production-режим PRIME NICK использует связку Fragment + MTProto:
+
+1. Fragment отсекает auction/sale/sold/collectible/reserved username.
+2. MTProto `contacts.resolveUsername` проверяет, занят ли username реальным Telegram-аккаунтом, каналом или чатом.
+
+### Railway Variables
+
+```env
+USERNAME_CHECK_MODE=mtproto
+TELEGRAM_API_ID=123456
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_STRING_SESSION=your_string_session
+MTPROTO_CHECK_DELAY_SECONDS=0.8
+```
+
+### Как получить TELEGRAM_STRING_SESSION
+
+Локально установи зависимости и выполни:
+
+```bash
+pip install telethon
+python scripts/create_telethon_session.py
+```
+
+Введи `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, номер телефона, код Telegram и пароль 2FA, если он включён. Скрипт выведет `TELEGRAM_STRING_SESSION`. Добавь его в Railway Variables.
+
+API ID и API Hash создаются в Telegram на `my.telegram.org`.

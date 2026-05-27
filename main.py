@@ -31,6 +31,10 @@ app = create_app(
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    checker_start = getattr(username_checker, "start", None)
+    if checker_start:
+        await checker_start()
+
     await bot.set_webhook(
         settings.webhook_url,
         secret_token=settings.WEBHOOK_SECRET or None,
@@ -42,6 +46,10 @@ async def on_startup() -> None:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    checker_close = getattr(username_checker, "close", None)
+    if checker_close:
+        await checker_close()
+
     await dp.storage.close()
     await bot.session.close()
     await redis.aclose()
