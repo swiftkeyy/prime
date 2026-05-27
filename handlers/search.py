@@ -18,7 +18,13 @@ from keyboards import search as kb
 from services.attempts import attempts_reset_left, can_search, consume_attempt
 from services.prime_access import is_prime_active
 from services.reservations import is_username_reserved, reserve_username
-from services.username_checker import UsernameCheckError, UsernameCheckerAdapter, UsernameCheckerNotConfigured, is_username_available
+from services.username_checker import (
+    UsernameCheckError,
+    UsernameCheckerAdapter,
+    UsernameCheckerNotConfigured,
+    UsernameCheckerRateLimited,
+    is_username_available,
+)
 from services.username_generator import generate_username, generate_username_variants, normalize_username_seed
 from texts import (
     CHECK_UNAVAILABLE,
@@ -33,6 +39,7 @@ from texts import (
     attempts_limit,
     custom_nick_not_found,
     custom_nick_results,
+    check_rate_limited,
     reserve_already_own,
     reserve_limit_reached,
     reserve_success,
@@ -134,7 +141,7 @@ async def custom_nick_process(
     )
     # Hard cap: webhook handlers must finish fast. One custom request checks
     # several real Telegram usernames, so do not let env values make it hang.
-    max_candidates = min(configured_max_candidates, 18 if is_prime_active(current_user) else 12)
+    max_candidates = min(configured_max_candidates, 8 if is_prime_active(current_user) else 5)
     target_count = max(1, settings.USERNAME_SUGGESTIONS_COUNT)
     candidates = generate_username_variants(seed, limit=max_candidates)
     found: list[str] = []
@@ -155,6 +162,12 @@ async def custom_nick_process(
                 is_username_available(candidate, checker=username_checker, redis=redis),
                 timeout=min(max(3, settings.USERNAME_CHECK_TIMEOUT + 2), max(1, time_left)),
             )
+        except UsernameCheckerRateLimited as exc:
+            logger.warning("username checker rate-limited for custom suggestions retry_after=%s", exc.retry_after)
+            await add_search(session, current_user, None, len(seed), filters, "checker_rate_limited")
+            await state.clear()
+            await safe_message_edit(status_message, check_rate_limited(exc.retry_after), reply_markup=kb.custom_prompt())
+            return
         except UsernameCheckerNotConfigured:
             logger.warning("username checker is not configured for custom suggestions")
             await add_search(session, current_user, None, len(seed), filters, "checker_error")
@@ -213,10 +226,10 @@ async def search_by_length(
     configured_max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if prime_active else settings.SEARCH_MAX_CANDIDATES
     if length == 5 and prime_active:
         # Short clean usernames are extremely scarce. Use a deeper scan only for PRIME 5-symbol mode.
-        max_candidates = min(max(settings.PRIME_5_SEARCH_MAX_CANDIDATES, configured_max_candidates), 28)
+        max_candidates = min(max(settings.PRIME_5_SEARCH_MAX_CANDIDATES, configured_max_candidates), 8)
         total_timeout = max(12, settings.PRIME_5_SEARCH_TOTAL_TIMEOUT_SECONDS)
     else:
-        max_candidates = min(configured_max_candidates, 16 if prime_active else 10)
+        max_candidates = min(configured_max_candidates, 7 if prime_active else 4)
         total_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
 
     await safe_edit(callback, generating_for_length(length, max_candidates))
@@ -240,6 +253,11 @@ async def search_by_length(
                 is_username_available(candidate, checker=username_checker, redis=redis),
                 timeout=min(max(3, settings.USERNAME_CHECK_TIMEOUT + 2), max(1, time_left)),
             )
+        except UsernameCheckerRateLimited as exc:
+            logger.warning("username checker rate-limited retry_after=%s", exc.retry_after)
+            await add_search(session, current_user, None, length, filters, "checker_rate_limited")
+            await safe_edit(callback, check_rate_limited(exc.retry_after), reply_markup=kb.retry(length))
+            return
         except UsernameCheckerNotConfigured:
             logger.warning("username checker is not configured")
             await add_search(session, current_user, None, length, filters, "checker_error")
