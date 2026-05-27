@@ -31,29 +31,33 @@ async def username_stock_worker(
         settings.USERNAME_STOCK_TTL_HOURS,
         settings.USERNAME_LIVE_CHECK_ENABLED,
     )
-    lengths = [5, 6, 7]
-    idx = 0
-
     while True:
         try:
             async with sessionmaker() as session:
                 await release_expired_stock_holds(session)
                 await session.commit()
 
-            length = lengths[idx % len(lengths)]
-            idx += 1
-            target = {
+            targets = {
                 5: settings.USERNAME_STOCK_MIN_5,
                 6: settings.USERNAME_STOCK_MIN_6,
                 7: settings.USERNAME_STOCK_MIN_7,
-            }[length]
-
+            }
+            counts: dict[int, int] = {}
             async with sessionmaker() as session:
-                current = await count_available_stock(session, length)
+                for item_length in (5, 6, 7):
+                    counts[item_length] = await count_available_stock(session, item_length)
                 await session.commit()
-            if current >= target:
+
+            deficits = {item_length: targets[item_length] - counts[item_length] for item_length in (5, 6, 7)}
+            if max(deficits.values()) <= 0:
                 await asyncio.sleep(max(2.0, settings.USERNAME_STOCK_CHECK_INTERVAL_SECONDS))
                 continue
+
+            # Fill the emptiest bucket first. PRIME 5-symbol results are the most
+            # visible feature, so ties prefer 5, then 6, then 7.
+            length = max((5, 6, 7), key=lambda item_length: (deficits[item_length], -item_length))
+            target = targets[length]
+            current = counts[length]
 
             # Worker may use digits for 5 chars to build useful stock. Pure 5-letter
             # usernames are nearly impossible in 2026.
