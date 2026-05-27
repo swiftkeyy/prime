@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aiogram import Bot, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,8 @@ async def cmd_start(
     is_new_user: bool,
     start_payload: str | None,
     settings: Settings,
+    state: FSMContext,
 ) -> None:
+    await state.clear()
     await process_referral(session, bot, current_user, start_payload, is_new_user, settings)
     await message.answer(WELCOME, reply_markup=main_menu())

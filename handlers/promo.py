@@ -25,7 +25,7 @@ async def promo_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(PromoState.waiting_code)
+@router.message(PromoState.waiting_code, F.text, ~F.text.startswith("/"))
 async def promo_code(message: Message, state: FSMContext, session: AsyncSession, current_user: User) -> None:
     try:
         days = await activate_promo(session, current_user, message.text or "")

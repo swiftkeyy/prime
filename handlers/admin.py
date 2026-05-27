@@ -148,7 +148,8 @@ def format_payment_amount(amount: Any, currency: str) -> str:
 
 
 @router.message(Command("admin"))
-async def cmd_admin(message: Message, settings: Settings) -> None:
+async def cmd_admin(message: Message, state: FSMContext, settings: Settings) -> None:
+    await state.clear()
     if await deny(message, settings):
         return
     await message.answer(admin_home_text(), reply_markup=admin_menu())
