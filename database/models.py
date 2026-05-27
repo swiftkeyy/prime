@@ -110,6 +110,29 @@ class ReservedUsername(Base):
     source_search: Mapped[Search | None] = relationship()
 
 
+
+
+class UsernameStock(Base):
+    __tablename__ = "username_stock"
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_username_stock_username"),
+        Index("ix_username_stock_status_length", "status", "length"),
+        Index("ix_username_stock_available", "length", "status", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    length: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="available", nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(64), default="worker", nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    issued_to_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    issued_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class Payment(Base):
     __tablename__ = "payments"
 

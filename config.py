@@ -71,6 +71,20 @@ class Settings(BaseSettings):
     USERNAME_SUGGESTIONS_MAX_CANDIDATES: int = 5
     PRIME_USERNAME_SUGGESTIONS_MAX_CANDIDATES: int = 8
 
+    # Production-safe username delivery. Live Telegram username checks are
+    # extremely rate-limited, so user-facing search should use a slowly
+    # pre-verified stock instead of burning MTProto requests on every click.
+    USERNAME_STOCK_ENABLED: bool = True
+    USERNAME_STOCK_WORKER_ENABLED: bool = True
+    USERNAME_LIVE_CHECK_ENABLED: bool = False
+    USERNAME_CUSTOM_LIVE_CHECK_ENABLED: bool = False
+    USERNAME_STOCK_TTL_HOURS: int = 6
+    USERNAME_STOCK_HOLD_MINUTES: int = 15
+    USERNAME_STOCK_CHECK_INTERVAL_SECONDS: float = 45.0
+    USERNAME_STOCK_MIN_5: int = 3
+    USERNAME_STOCK_MIN_6: int = 8
+    USERNAME_STOCK_MIN_7: int = 8
+
     @field_validator("RAILWAY_PUBLIC_URL")
     @classmethod
     def trim_public_url(cls, value: str) -> str:

@@ -8,6 +8,7 @@ import uvicorn
 
 from config import get_settings
 from loader import create_runtime
+from services.username_stock_worker import username_stock_worker
 from web.app import create_app
 
 logging.basicConfig(
@@ -18,6 +19,7 @@ logger = logging.getLogger("prime_nick")
 
 settings = get_settings()
 bot, dp, redis, engine, sessionmaker, username_checker = create_runtime(settings)
+stock_worker_task: asyncio.Task | None = None
 app = create_app(
     bot=bot,
     dp=dp,
@@ -35,6 +37,18 @@ async def on_startup() -> None:
     if checker_start:
         await checker_start()
 
+    global stock_worker_task
+    if settings.USERNAME_STOCK_ENABLED and settings.USERNAME_STOCK_WORKER_ENABLED:
+        stock_worker_task = asyncio.create_task(
+            username_stock_worker(
+                sessionmaker=sessionmaker,
+                settings=settings,
+                username_checker=username_checker,
+                redis=redis,
+            )
+        )
+        logger.info("Username stock worker scheduled")
+
     await bot.set_webhook(
         settings.webhook_url,
         secret_token=settings.WEBHOOK_SECRET or None,
@@ -46,6 +60,14 @@ async def on_startup() -> None:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    global stock_worker_task
+    if stock_worker_task is not None:
+        stock_worker_task.cancel()
+        try:
+            await stock_worker_task
+        except asyncio.CancelledError:
+            pass
+
     checker_close = getattr(username_checker, "close", None)
     if checker_close:
         await checker_close()
