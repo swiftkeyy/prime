@@ -50,7 +50,9 @@ class FailClosedUsernameChecker:
 
 class RateLimiterMixin:
     def __init__(self, delay_seconds: float) -> None:
-        self.delay_seconds = max(0.05, float(delay_seconds))
+        # Do not let Railway env accidentally spam Telegram. 0.35 sec is still fast
+        # enough for UX, but much safer than bursts.
+        self.delay_seconds = max(0.35, float(delay_seconds))
         self._lock = asyncio.Lock()
         self._last_request = 0.0
 
@@ -63,13 +65,35 @@ class RateLimiterMixin:
             self._last_request = asyncio.get_event_loop().time()
 
 
-class MTProtoSettableUsernameChecker(RateLimiterMixin):
-    """Strict Telegram checker for usernames a real account can set.
+# Words that Telegram often keeps occupied/reserved/collectible or that are known
+# bad fits for automatic output. This list protects UX from famous false hopes.
+KNOWN_BAD_USERNAMES = {
+    "admin", "administrator", "support", "telegram", "settings", "username",
+    "login", "help", "owner", "moderator", "security", "premium", "fragment",
+    "wallet", "crypto", "stars", "store", "bot", "bots", "api", "web",
+    "angel", "roman", "dobro", "zapor", "apple", "music", "money", "video",
+    "cloud", "world", "super", "queen", "joker", "magic", "prime",
+}
 
-    IMPORTANT: Fragment/t.me/Bot API can say that a nickname looks free while
-    Telegram will still reject it in profile settings. PRIME NICK must use
-    account.checkUsername through a real user MTProto session. The nickname is
-    shown only when Telegram itself returns True for the current account.
+
+class MTProtoResolveUsernameChecker(RateLimiterMixin):
+    """No-flood MTProto checker for production search.
+
+    Telegram's account.checkUsername is the only method that answers "can THIS
+    account set this username", but it has a very aggressive flood limit. In the
+    previous build it received FloodWaitError for 70k+ seconds after only a few
+    checks, so it cannot be used inside live scans.
+
+    This checker uses contacts.resolveUsername instead:
+    - if Telegram resolves @username to a user/channel/chat -> occupied;
+    - if Telegram raises UsernameNotOccupiedError -> currently not occupied;
+    - invalid/reserved/known-bad candidates -> rejected;
+    - FloodWait does not break the whole bot: candidate is skipped and search
+      continues/ends normally.
+
+    Result: no fake "checker unavailable" loop and no occupied names like
+    @roman/@angel. For absolute "settable for this exact account" verification,
+    use a slow background pool, not live user requests.
     """
 
     def __init__(
@@ -90,6 +114,7 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
         self._started = False
         self._start_lock = asyncio.Lock()
         self._own_username: str | None = None
+        self._resolve_flood_until = 0.0
 
     async def start(self) -> None:
         async with self._start_lock:
@@ -114,7 +139,7 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
                 self.api_hash,
                 sequential_updates=True,
                 connection_retries=2,
-                request_retries=1,
+                request_retries=0,
                 timeout=self.timeout,
             )
             await self._client.connect()
@@ -126,7 +151,7 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
             me = await self._client.get_me()
             self._own_username = (getattr(me, "username", None) or "").lower() or None
             self._started = True
-            logger.info("MTProto settable username checker connected own_username=%s", self._own_username or "none")
+            logger.info("MTProto resolveUsername checker connected own_username=%s", self._own_username or "none")
 
     async def close(self) -> None:
         if self._client is not None:
@@ -143,48 +168,69 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
         if not is_valid_username(username):
             return False
 
+        if username in KNOWN_BAD_USERNAMES:
+            logger.info("MTProto resolveUsername @%s -> blocked by local known-bad list", username)
+            return False
+
         await self._ensure_started()
+
+        if self._own_username and username == self._own_username:
+            logger.info("MTProto resolveUsername @%s -> own username, skip", username)
+            return False
+
+        now = asyncio.get_event_loop().time()
+        if now < self._resolve_flood_until:
+            # Do not raise and do not show the scary unavailable message for every
+            # user. Just skip this candidate while Telegram cooldown is active.
+            logger.warning("MTProto resolve cooldown active, skip @%s", username)
+            return False
+
         await self._rate_limit()
 
         try:
             from telethon.errors import FloodWaitError, RPCError
-            from telethon.errors.rpcerrorlist import UsernameInvalidError, UsernameOccupiedError
-            from telethon.tl.functions.account import CheckUsernameRequest
+            from telethon.errors.rpcerrorlist import UsernameInvalidError, UsernameNotOccupiedError
+            from telethon.tl.functions.contacts import ResolveUsernameRequest
         except ImportError as exc:
             raise UsernameCheckerNotConfigured("telethon import error") from exc
 
-        if self._own_username and username == self._own_username:
-            logger.info("MTProto check @%s -> own username, skip", username)
-            return False
-
         try:
-            result = await asyncio.wait_for(
-                self._client(CheckUsernameRequest(username)),  # type: ignore[misc]
+            await asyncio.wait_for(
+                self._client(ResolveUsernameRequest(username)),  # type: ignore[misc]
                 timeout=self.timeout,
             )
-            logger.info("MTProto account.checkUsername @%s -> %s", username, bool(result))
-            return bool(result)
+            logger.info("MTProto resolveUsername @%s -> occupied", username)
+            return False
 
-        except (UsernameOccupiedError, UsernameInvalidError):
-            logger.info("MTProto account.checkUsername @%s -> occupied/invalid", username)
+        except UsernameNotOccupiedError:
+            logger.info("MTProto resolveUsername @%s -> not occupied", username)
+            return True
+
+        except UsernameInvalidError:
+            logger.info("MTProto resolveUsername @%s -> invalid", username)
             return False
 
         except FloodWaitError as exc:
             seconds = int(getattr(exc, "seconds", 0) or 0)
-            logger.warning("MTProto flood wait while checking @%s: %s sec", username, seconds)
-            raise UsernameCheckError(f"mtproto flood_wait {seconds}s") from exc
+            cooldown = min(max(seconds, 30), 600)
+            self._resolve_flood_until = asyncio.get_event_loop().time() + cooldown
+            logger.warning(
+                "MTProto resolve flood wait while checking @%s: %s sec; cooldown=%s sec",
+                username,
+                seconds,
+                cooldown,
+            )
+            return False
 
         except asyncio.TimeoutError:
-            logger.warning("MTProto timeout for @%s; candidate skipped", username)
+            logger.warning("MTProto resolve timeout for @%s; candidate skipped", username)
             return False
 
         except RPCError as exc:
-            # Telegram has several non-settable states: collectible/auction/reserved/
-            # premium/unavailable. They are not free, but not fatal for the whole search.
             message = f"{exc.__class__.__name__} {str(exc)}".lower()
             blocked_markers = (
-                "username_occupied",
                 "username_invalid",
+                "username_occupied",
                 "username_purchase_available",
                 "purchase_available",
                 "username_not_available",
@@ -197,28 +243,31 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
                 "auction",
             )
             if any(marker in message for marker in blocked_markers):
-                logger.info("MTProto account.checkUsername @%s -> not settable: %s", username, exc.__class__.__name__)
+                logger.info("MTProto resolveUsername @%s -> not usable: %s", username, exc.__class__.__name__)
                 return False
-            logger.warning("MTProto RPC error for @%s: %s", username, message[:180])
+            logger.warning("MTProto resolve RPC error for @%s: %s", username, message[:180])
             return False
 
         except Exception as exc:
-            # Do not show a fake 'available' result on unknown errors. Skip candidate.
-            logger.warning("MTProto unexpected error for @%s: %s", username, exc.__class__.__name__)
+            logger.warning("MTProto resolve unexpected error for @%s: %s", username, exc.__class__.__name__)
             return False
+
+
+# Backwards-compatible name: other modules may import this class from older builds.
+MTProtoSettableUsernameChecker = MTProtoResolveUsernameChecker
 
 
 def _has_mtproto_credentials(settings: Settings) -> bool:
     return bool(settings.TELEGRAM_API_ID and settings.TELEGRAM_API_HASH and settings.TELEGRAM_STRING_SESSION)
 
 
-def _build_mtproto_checker(settings: Settings) -> MTProtoSettableUsernameChecker:
+def _build_mtproto_checker(settings: Settings) -> MTProtoResolveUsernameChecker:
     if not _has_mtproto_credentials(settings):
         raise UsernameCheckerNotConfigured(
             "MTProto credentials are missing. Set USERNAME_CHECK_MODE=mtproto, "
             "TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_STRING_SESSION."
         )
-    return MTProtoSettableUsernameChecker(
+    return MTProtoResolveUsernameChecker(
         api_id=settings.TELEGRAM_API_ID,
         api_hash=settings.TELEGRAM_API_HASH,
         string_session=settings.TELEGRAM_STRING_SESSION,
@@ -235,7 +284,7 @@ def build_checker(settings: Settings) -> UsernameCheckerAdapter:
         return MockUsernameChecker()
 
     if _has_mtproto_credentials(settings):
-        logger.info("Using strict MTProto account.checkUsername checker")
+        logger.info("Using MTProto resolveUsername no-flood checker")
         return _build_mtproto_checker(settings)
 
     reason = (
@@ -258,11 +307,13 @@ async def is_username_available(
     if not is_valid_username(username):
         return False
 
-    # v6 drops old false-positive cache records from Fragment/BotAPI builds.
-    cache_key = f"prime_nick:username:v6:{username}"
+    # v8 drops old account.checkUsername FloodWait/Fragment false-positive cache.
+    cache_key = f"prime_nick:username:v8:{username}"
     if redis:
         cached = await redis.get(cache_key)
         if cached is not None:
+            if isinstance(cached, bytes):
+                cached = cached.decode()
             return cached == "1"
 
     available = await checker.is_available(username)

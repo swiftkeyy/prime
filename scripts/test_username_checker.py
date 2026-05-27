@@ -29,7 +29,7 @@ async def main() -> None:
     try:
         for username in usernames:
             result = await is_username_available(username, checker=checker, redis=None)
-            print(f"@{username}: {'FREE / SETTABLE' if result else 'BUSY / NOT SETTABLE'}")
+            print(f"@{username}: {'FREE / NOT OCCUPIED' if result else 'BUSY / NOT USABLE'}")
     finally:
         if close:
             await close()
