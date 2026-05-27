@@ -7,12 +7,24 @@ from database.models import User
 from keyboards.filters import filters_menu as filters_kb
 from keyboards.main import back_home
 from texts import FILTERS_SAVED, filters_menu
+from aiogram.exceptions import TelegramBadRequest
 
 router = Router(name="filters")
 
 
 async def render(callback: CallbackQuery, user: User) -> None:
-    await callback.message.edit_text(filters_menu(user), reply_markup=filters_kb(user.digits_enabled, user.underscore_enabled))
+    try:
+        await callback.message.edit_text(
+            filters_menu(user),
+            reply_markup=filters_kb(
+                user.digits_enabled,
+                user.underscore_enabled,
+            ),
+        )
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
+
     await callback.answer()
 
 
