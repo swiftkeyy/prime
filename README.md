@@ -118,13 +118,22 @@ ROBOKASSA_TEST_MODE=true
 
 Stars payments use currency `XTR`. The bot creates an invoice, validates `pre_checkout_query`, handles `successful_payment`, writes a payment row and activates PRIME PASS.
 
-## Username checker modes
+## Username checker
+
+Production uses only strict MTProto checking through `account.checkUsername`.
+Fragment, `t.me` and Bot API checks are disabled for production because they can show occupied names like `roman`, `angel` or `dobro` as free.
+
+Required Railway Variables:
 
 ```env
-USERNAME_CHECK_MODE=http
+USERNAME_CHECK_MODE=mtproto
+TELEGRAM_API_ID=123456
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_STRING_SESSION=your_string_session
+MTPROTO_CHECK_DELAY_SECONDS=0.35
 ```
 
-`http` checks public `https://t.me/{username}` with rate limiting and caching. For tests you can use:
+For local tests only:
 
 ```env
 USERNAME_CHECK_MODE=mock
@@ -181,10 +190,9 @@ Features:
 
 ## Строгая проверка username через MTProto
 
-Bot API не умеет надёжно проверять произвольные личные username. Поэтому production-режим PRIME NICK использует связку Fragment + MTProto:
+Bot API, `t.me` и Fragment не умеют надёжно проверять, можно ли реально поставить username на аккаунт. Поэтому production-режим PRIME NICK использует только MTProto `account.checkUsername`.
 
-1. Fragment отсекает auction/sale/sold/collectible/reserved username.
-2. MTProto `contacts.resolveUsername` проверяет, занят ли username реальным Telegram-аккаунтом, каналом или чатом.
+Ник показывается пользователю только если Telegram возвращает `True`, то есть username можно поставить на текущий MTProto-аккаунт прямо сейчас.
 
 ### Railway Variables
 
@@ -193,7 +201,7 @@ USERNAME_CHECK_MODE=mtproto
 TELEGRAM_API_ID=123456
 TELEGRAM_API_HASH=your_api_hash
 TELEGRAM_STRING_SESSION=your_string_session
-MTPROTO_CHECK_DELAY_SECONDS=0.8
+MTPROTO_CHECK_DELAY_SECONDS=0.35
 ```
 
 ### Как получить TELEGRAM_STRING_SESSION
