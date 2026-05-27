@@ -153,7 +153,14 @@ def filters_menu(user: User) -> str:
 ╰ Подчёркивание: <b>{underscore}</b>"""
 
 
-def profile(user: User, settings: Settings, time_left: str, attempts_total: int) -> str:
+def profile(
+    user: User,
+    settings: Settings,
+    time_left: str,
+    attempts_total: int,
+    reserved_count: int = 0,
+    reserved_limit: int = 10,
+) -> str:
     status = "PRIME PASS" if user.is_prime else "Base"
     prime_until = format_dt(user.prime_until) if user.is_prime else "не активен"
     link = f"https://t.me/{settings.BOT_USERNAME}?start={user.telegram_id}"
@@ -164,6 +171,7 @@ def profile(user: User, settings: Settings, time_left: str, attempts_total: int)
 │ Статус: <b>{status}</b>
 │ Поисков выполнено: <b>{user.total_searches}</b>
 │ Доступных попыток: <b>{attempts_total}</b>
+│ Резервы username: <b>{reserved_count}/{reserved_limit}</b>
 ╰ PRIME до: <b>{prime_until}</b>
 
 ╭─ <b>Реферальная система</b>
@@ -214,3 +222,67 @@ def promo_success(days: int) -> str:
     return f"""✅ <b>Промокод принят</b>
 
 На аккаунт начислен PRIME PASS на <b>{days}</b> дней."""
+
+def reserve_success(username: str, used: int, limit: int) -> str:
+    raw = username.lstrip("@")
+    return f"""✅ <b>Ник зарезервирован</b>
+
+@{h(raw)} закреплён за твоим аккаунтом в PRIME NICK.
+Теперь этот username не будет выпадать другим пользователям бота.
+
+Резервы: <b>{used}/{limit}</b>"""
+
+
+def reserve_already_own(username: str, used: int, limit: int) -> str:
+    raw = username.lstrip("@")
+    return f"""🧷 <b>Уже в резерве</b>
+
+@{h(raw)} уже закреплён за твоим аккаунтом.
+
+Резервы: <b>{used}/{limit}</b>"""
+
+
+def reserve_taken(username: str) -> str:
+    raw = username.lstrip("@")
+    return f"""⛔ <b>Ник уже зарезервирован</b>
+
+@{h(raw)} уже закреплён за другим пользователем PRIME NICK.
+Он больше не будет попадать в выдачу."""
+
+
+def reserve_limit_reached(limit: int) -> str:
+    return f"""⛔ <b>Лимит резервов</b>
+
+Ты уже зарезервировал максимум: <b>{limit}</b> username.
+
+Base лимит: <b>10</b>
+PRIME PASS лимит: <b>30</b>"""
+
+
+def reservations_list_text(reservations: list, used: int, limit: int) -> str:
+    if not reservations:
+        return f"""🧷 <b>Мои резервы</b>
+
+Пока нет закреплённых username.
+Найди свободный ник и нажми <b>«Зарезервировать»</b>.
+
+Лимит: <b>{used}/{limit}</b>"""
+
+    lines = []
+    for idx, item in enumerate(reservations[:30], start=1):
+        lines.append(f"{idx}. @{h(item.username)} · {h(str(item.length))} симв.")
+    joined = "\n".join(lines)
+    return f"""🧷 <b>Мои резервы</b>
+
+Закреплено: <b>{used}/{limit}</b>
+
+{joined}
+
+Нажми на ник ниже, чтобы освободить резерв."""
+
+
+def reservation_released(username: str) -> str:
+    raw = username.lstrip("@")
+    return f"""✅ <b>Резерв снят</b>
+
+@{h(raw)} снова может появляться в выдаче PRIME NICK."""

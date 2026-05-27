@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -39,6 +39,7 @@ class User(Base):
     searches: Mapped[list["Search"]] = relationship(back_populates="user")
     payments: Mapped[list["Payment"]] = relationship(back_populates="user")
     promo_activations: Mapped[list["PromoActivation"]] = relationship(back_populates="user")
+    reserved_usernames: Mapped[list["ReservedUsername"]] = relationship(back_populates="user")
 
 
 class Search(Base):
@@ -53,6 +54,31 @@ class Search(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     user: Mapped[User] = relationship(back_populates="searches")
+
+
+class ReservedUsername(Base):
+    __tablename__ = "reserved_usernames"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    length: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_search_id: Mapped[int | None] = mapped_column(ForeignKey("searches.id", ondelete="SET NULL"), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index(
+            "uq_reserved_usernames_active_username",
+            "username",
+            unique=True,
+            postgresql_where=(is_active.is_(True)),
+        ),
+    )
+
+    user: Mapped[User] = relationship(back_populates="reserved_usernames")
+    source_search: Mapped[Search | None] = relationship()
 
 
 class Payment(Base):

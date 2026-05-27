@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from config import get_settings
 from database.models import Base
+from database.session import normalize_database_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -17,12 +18,13 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+database_url = normalize_database_url(settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", database_url)
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=settings.DATABASE_URL,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

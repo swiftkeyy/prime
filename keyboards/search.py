@@ -25,6 +25,7 @@ def result(username: str, length: int) -> InlineKeyboardMarkup:
     raw = username.lstrip("@")
     kb = InlineKeyboardBuilder()
     kb.button(text="🌐 Открыть в Telegram", url=f"https://t.me/{raw}")
+    kb.button(text="🧷 Зарезервировать", callback_data=f"search:reserve:{raw}:{length}")
     kb.button(text="🔁 Искать ещё", callback_data=f"search:length:{length}")
     kb.button(text="🎛 Фильтры", callback_data="filters:menu")
     kb.button(text="↩️ В меню", callback_data="main:home")
@@ -39,6 +40,32 @@ def retry(length: int | None = None) -> InlineKeyboardMarkup:
     else:
         kb.button(text="🔁 Повторить поиск", callback_data="search:menu")
     kb.button(text="🎛 Изменить фильтры", callback_data="filters:menu")
+    kb.button(text="↩️ В меню", callback_data="main:home")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def reserved_result(username: str, length: int | None = None) -> InlineKeyboardMarkup:
+    raw = username.lstrip("@")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🌐 Открыть в Telegram", url=f"https://t.me/{raw}")
+    kb.button(text="🧷 Мои резервы", callback_data="profile:reservations")
+    if length:
+        kb.button(text="🔁 Искать ещё", callback_data=f"search:length:{length}")
+    else:
+        kb.button(text="🔎 Поиск", callback_data="search:menu")
+    kb.button(text="↩️ В меню", callback_data="main:home")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def reserve_error(length: int | None = None) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🧷 Мои резервы", callback_data="profile:reservations")
+    if length:
+        kb.button(text="🔁 Искать ещё", callback_data=f"search:length:{length}")
+    else:
+        kb.button(text="🔎 Поиск", callback_data="search:menu")
     kb.button(text="↩️ В меню", callback_data="main:home")
     kb.adjust(1)
     return kb.as_markup()

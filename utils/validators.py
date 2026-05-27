@@ -6,6 +6,10 @@ USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
 PROMO_RE = re.compile(r"^[A-Z0-9_-]{3,32}$")
 
 
+def normalize_username(username: str) -> str:
+    return username.strip().lstrip("@").split("/", maxsplit=1)[0]
+
+
 def is_valid_username(username: str) -> bool:
     if not 5 <= len(username) <= 32:
         return False

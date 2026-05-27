@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     SEARCH_MAX_CANDIDATES: int = 35
     PRIME_SEARCH_MAX_CANDIDATES: int = 70
 
+    FREE_RESERVED_USERNAMES_LIMIT: int = 10
+    PRIME_RESERVED_USERNAMES_LIMIT: int = 30
+
     @field_validator("RAILWAY_PUBLIC_URL")
     @classmethod
     def trim_public_url(cls, value: str) -> str:

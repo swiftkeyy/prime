@@ -18,13 +18,13 @@ router = Router(name="start")
 @router.message(CommandStart())
 async def cmd_start(
     message: Message,
+    state: FSMContext,
     bot: Bot,
     session: AsyncSession,
     current_user: User,
     is_new_user: bool,
     start_payload: str | None,
     settings: Settings,
-    state: FSMContext,
 ) -> None:
     await state.clear()
     await process_referral(session, bot, current_user, start_payload, is_new_user, settings)
