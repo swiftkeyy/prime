@@ -54,4 +54,4 @@ async def on_shutdown() -> None:
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", settings.PORT)), proxy_headers=True)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", settings.PORT)), proxy_headers=True)
