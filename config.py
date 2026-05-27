@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     FREE_RESERVED_USERNAMES_LIMIT: int = 10
     PRIME_RESERVED_USERNAMES_LIMIT: int = 30
 
+    USERNAME_SUGGESTIONS_COUNT: int = 5
+    USERNAME_SUGGESTIONS_MAX_CANDIDATES: int = 120
+    PRIME_USERNAME_SUGGESTIONS_MAX_CANDIDATES: int = 220
+
     @field_validator("RAILWAY_PUBLIC_URL")
     @classmethod
     def trim_public_url(cls, value: str) -> str:

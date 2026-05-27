@@ -288,3 +288,41 @@ def reservation_released(username: str) -> str:
     return f"""✅ <b>Резерв снят</b>
 
 @{h(raw)} снова может появляться в выдаче PRIME NICK."""
+
+CUSTOM_NICK_PROMPT = """✨ <b>Подбор по слову</b>
+
+Напиши, какой ник хочешь получить.
+Можно отправить имя, слово, @username или ссылку t.me.
+
+Я соберу до <b>5 красивых свободных вариантов</b> и сразу проверю их через Fragment."""
+
+CUSTOM_NICK_GENERATING = """🧬 <b>Собираю варианты...</b>
+
+Делаю ник читаемым, красивым и проверяю доступность."""
+
+CUSTOM_NICK_BAD_INPUT = """⛔ <b>Не могу собрать ник</b>
+
+Отправь слово или основу ника: например <code>dobro</code>, <code>nikita</code>, <code>zapor</code>."""
+
+
+def custom_nick_results(seed: str, usernames: list[str]) -> str:
+    lines = []
+    for idx, username in enumerate(usernames[:5], start=1):
+        raw = username.lstrip("@")
+        lines.append(f"{idx}. @{h(raw)}")
+    joined = "\n".join(lines)
+    return f"""✅ <b>Варианты найдены</b>
+
+Основа: <b>{h(seed)}</b>
+
+╭─ <b>PRIME IDEAS</b>
+{joined}
+╰ Нажми на ник, чтобы открыть, или на 🧷, чтобы зарезервировать."""
+
+
+def custom_nick_not_found(seed: str) -> str:
+    return f"""⏳ <b>Свободные варианты не найдены</b>
+
+По основе <b>{h(seed)}</b> сейчас не удалось найти свободный красивый ник.
+
+Попробуй другое слово, более короткую основу или включи цифры в фильтрах."""
