@@ -29,19 +29,82 @@ class MockUsernameChecker:
         return random.random() < 0.18
 
 
-class TMeHttpUsernameChecker:
-    def __init__(self, timeout: int = 7) -> None:
-        self.timeout = timeout
+class RateLimiterMixin:
+    def __init__(self, delay_seconds: float) -> None:
+        self.delay_seconds = delay_seconds
         self._lock = asyncio.Lock()
         self._last_request = 0.0
 
-    async def _rate_limit(self, delay_seconds: float = 0.35) -> None:
+    async def _rate_limit(self) -> None:
         async with self._lock:
             now = asyncio.get_event_loop().time()
-            delay = delay_seconds - (now - self._last_request)
+            delay = self.delay_seconds - (now - self._last_request)
             if delay > 0:
                 await asyncio.sleep(delay)
             self._last_request = asyncio.get_event_loop().time()
+
+
+class TelegramBotApiUsernameChecker(RateLimiterMixin):
+    """Final Telegram-side guard against false positives.
+
+    Fragment is good for collectible/auction/reserved usernames, but it may not
+    reliably tell whether a regular @username is already attached to a Telegram
+    account/channel. Bot API getChat is used as the final check:
+      - getChat(@name) OK       -> username is taken
+      - "chat not found"        -> not attached to a public Telegram entity
+
+    A username is marked available only after Fragment does not block it AND
+    getChat says that Telegram has no chat/user/channel with this username.
+    """
+
+    API_URL = "https://api.telegram.org/bot{token}/getChat"
+
+    def __init__(self, bot_token: str, timeout: int = 7, delay_seconds: float = 0.35) -> None:
+        super().__init__(delay_seconds=delay_seconds)
+        self.bot_token = bot_token
+        self.timeout = timeout
+
+    async def is_available(self, username: str) -> bool:
+        await self._rate_limit()
+        url = self.API_URL.format(token=self.bot_token)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url, params={"chat_id": f"@{username}"})
+        except httpx.HTTPError as exc:
+            logger.warning("telegram api checker network error: %s", exc.__class__.__name__)
+            raise UsernameCheckError("telegram api network error") from exc
+
+        if response.status_code in {429, 500, 502, 503, 504}:
+            raise UsernameCheckError(f"telegram api temporary status {response.status_code}")
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise UsernameCheckError("telegram api invalid json") from exc
+
+        if payload.get("ok") is True:
+            return False
+
+        description = str(payload.get("description", "")).lower()
+        error_code = int(payload.get("error_code") or response.status_code or 0)
+
+        if error_code == 400 and "chat not found" in description:
+            return True
+
+        # Treat everything ambiguous as temporary checker failure, not as a hit.
+        logger.warning(
+            "telegram api checker unexpected response for username=%s code=%s description=%s",
+            username,
+            error_code,
+            description[:120],
+        )
+        raise UsernameCheckError("telegram api unexpected response")
+
+
+class TMeHttpUsernameChecker(RateLimiterMixin):
+    def __init__(self, timeout: int = 7) -> None:
+        super().__init__(delay_seconds=0.35)
+        self.timeout = timeout
 
     async def is_available(self, username: str) -> bool:
         await self._rate_limit()
@@ -57,7 +120,8 @@ class TMeHttpUsernameChecker:
             return True
         if response.status_code in {200, 301, 302, 303, 307, 308}:
             text = response.text.lower()
-            if "tgme_username_link" in text or "if you have <strong>telegram</strong>" in text:
+            # Existing public users/channels usually have this OpenGraph block.
+            if "tgme_username_link" in text or "telegram.me/" in text or "property=\"og:title\"" in text:
                 return False
             return "username" in text and "not found" in text
         if response.status_code in {429, 500, 502, 503, 504}:
@@ -65,12 +129,12 @@ class TMeHttpUsernameChecker:
         return False
 
 
-class FragmentUsernameChecker:
-    """Checks username state through Fragment.
+class FragmentUsernameChecker(RateLimiterMixin):
+    """Fragment-side guard for collectible, auction, sold and reserved usernames.
 
-    Fragment does not provide a stable public API, so this adapter uses the same
-    AJAX endpoint that the Fragment web interface calls. If Fragment changes the
-    markup, the adapter raises UsernameCheckError instead of returning a fake hit.
+    Fragment has no stable public API. This adapter intentionally errs on the
+    safe side: explicit Fragment hits are unavailable; ambiguous pages are passed
+    to the Telegram Bot API guard by StrictFragmentTelegramUsernameChecker.
     """
 
     BASE_URL = "https://fragment.com"
@@ -80,19 +144,34 @@ class FragmentUsernameChecker:
         "Chrome/122.0 Safari/537.36 PRIME-NICK/1.0"
     )
 
-    def __init__(self, timeout: int = 7, delay_seconds: float = 0.8) -> None:
-        self.timeout = timeout
-        self.delay_seconds = delay_seconds
-        self._lock = asyncio.Lock()
-        self._last_request = 0.0
+    BLOCKED_CLASSES = (
+        "tm-status-taken",
+        "tm-status-avail",
+        "tm-status-unavail",
+        "tm-status-sold",
+        "tm-status-resale",
+    )
+    BLOCKED_PHRASES = (
+        "already taken",
+        "is taken",
+        "unavailable",
+        "not available",
+        "sale price",
+        "place bid",
+        "bid history",
+        "minimum bid",
+        "auction",
+        "for sale",
+        "sold",
+        "owner",
+        "assigned to",
+        "collectible username",
+        "anonymous number",
+    )
 
-    async def _rate_limit(self) -> None:
-        async with self._lock:
-            now = asyncio.get_event_loop().time()
-            delay = self.delay_seconds - (now - self._last_request)
-            if delay > 0:
-                await asyncio.sleep(delay)
-            self._last_request = asyncio.get_event_loop().time()
+    def __init__(self, timeout: int = 7, delay_seconds: float = 0.8) -> None:
+        super().__init__(delay_seconds=delay_seconds)
+        self.timeout = timeout
 
     def _headers(self, username: str) -> dict[str, str]:
         return {
@@ -105,16 +184,12 @@ class FragmentUsernameChecker:
             "Connection": "keep-alive",
         }
 
-    @staticmethod
-    def _extract_status(markup: str) -> str | None:
-        text = markup.lower()
-        match = re.search(r"tm-section-header-status\s+([^\"']+)", text)
-        if match:
-            return match.group(1).strip()
-        for status in ("tm-status-taken", "tm-status-avail", "tm-status-unavail"):
-            if status in text:
-                return status
-        return None
+    @classmethod
+    def _is_blocked_by_fragment(cls, markup: str) -> bool:
+        text = re.sub(r"\s+", " ", markup.lower())
+        if any(item in text for item in cls.BLOCKED_CLASSES):
+            return True
+        return any(item in text for item in cls.BLOCKED_PHRASES)
 
     async def is_available(self, username: str) -> bool:
         await self._rate_limit()
@@ -132,50 +207,57 @@ class FragmentUsernameChecker:
             logger.warning("fragment checker unexpected status: %s", response.status_code)
             raise UsernameCheckError(f"fragment unexpected status {response.status_code}")
 
-        markup = ""
         try:
             payload = response.json()
         except ValueError:
             markup = response.text
         else:
-            # Fragment AJAX response usually contains HTML in `h`.
-            # If `h` is absent, the username is treated as basic available.
-            if "h" not in payload:
-                return True
-            markup = str(payload.get("h") or "")
+            # Fragment often returns HTML in `h`. If it returns another JSON
+            # shape, do NOT call it a hit; pass it to Telegram API guard.
+            markup = str(payload.get("h") or payload.get("html") or payload)
 
-        status = self._extract_status(markup)
-        if status is None:
-            # Plain HTML fallback. These pages are not free registration hits.
-            text = markup.lower()
-            if "telegram username" in text and ("sale price" in text or "bid history" in text or "owner" in text):
-                return False
-            logger.warning("fragment checker could not parse status for username=%s", username)
-            raise UsernameCheckError("fragment parse error")
-
-        # Fragment statuses:
-        # taken      -> already used on Telegram, not free
-        # avail      -> collectible auction/sale, not free registration
-        # unavail    -> sold/unavailable, not free
-        if "tm-status-taken" in status:
-            return False
-        if "tm-status-avail" in status:
-            return False
-        if "tm-status-unavail" in status:
+        if self._is_blocked_by_fragment(markup):
             return False
 
-        raise UsernameCheckError(f"fragment unknown status {status}")
+        # No Fragment auction/collectible/reserved signal found. This is not
+        # enough for a final "free" answer; Strict checker will verify via Bot API.
+        return True
+
+
+class StrictFragmentTelegramUsernameChecker:
+    """Fragment first, Telegram Bot API second.
+
+    This fixes false positives like @angel: Fragment can be ambiguous, while
+    Telegram itself says the username is already occupied. The bot now returns
+    a username only if both checks pass.
+    """
+
+    def __init__(self, fragment_checker: FragmentUsernameChecker, telegram_checker: TelegramBotApiUsernameChecker) -> None:
+        self.fragment_checker = fragment_checker
+        self.telegram_checker = telegram_checker
+
+    async def is_available(self, username: str) -> bool:
+        fragment_ok = await self.fragment_checker.is_available(username)
+        if not fragment_ok:
+            return False
+        return await self.telegram_checker.is_available(username)
 
 
 def build_checker(settings: Settings) -> UsernameCheckerAdapter:
     if settings.USERNAME_CHECK_MODE == "mock":
         return MockUsernameChecker()
     if settings.USERNAME_CHECK_MODE == "fragment":
-        return FragmentUsernameChecker(
-            timeout=settings.USERNAME_CHECK_TIMEOUT,
-            delay_seconds=settings.FRAGMENT_CHECK_DELAY_SECONDS,
+        return StrictFragmentTelegramUsernameChecker(
+            FragmentUsernameChecker(
+                timeout=settings.USERNAME_CHECK_TIMEOUT,
+                delay_seconds=settings.FRAGMENT_CHECK_DELAY_SECONDS,
+            ),
+            TelegramBotApiUsernameChecker(
+                bot_token=settings.BOT_TOKEN,
+                timeout=settings.USERNAME_CHECK_TIMEOUT,
+            ),
         )
-    return TMeHttpUsernameChecker(timeout=settings.USERNAME_CHECK_TIMEOUT)
+    return TelegramBotApiUsernameChecker(bot_token=settings.BOT_TOKEN, timeout=settings.USERNAME_CHECK_TIMEOUT)
 
 
 async def is_username_available(
@@ -189,7 +271,9 @@ async def is_username_available(
     if not is_valid_username(username):
         return False
 
-    cache_key = f"prime_nick:username:{username}"
+    # v2 bypasses old Redis records that could contain false positives from the
+    # previous Fragment-only checker.
+    cache_key = f"prime_nick:username:v2:{username}"
     if redis:
         cached = await redis.get(cache_key)
         if cached is not None:
