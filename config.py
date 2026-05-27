@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     ROBOKASSA_PASSWORD_2: str = ""
     ROBOKASSA_TEST_MODE: bool = True
 
+    LEGAL_INFO_LINK: str = "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
     USER_AGREEMENT_LINK: str = ""
     PRIVACY_POLICY_LINK: str = ""
     PRIME_TERMS_LINK: str = ""

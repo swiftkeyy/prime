@@ -208,18 +208,13 @@ def attempts_limit(time_left: str) -> str:
 
 
 def rules(settings: Settings) -> str:
-    return f"""🗂 <b>Правила PRIME NICK</b>
+    link = getattr(settings, "LEGAL_INFO_LINK", "") or "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
+    return f"""🗂 <b>Правовая информация PRIME NICK</b>
 
-Перед использованием сервиса ознакомься с документами:
+Перед использованием сервиса ознакомься с документом:
 
-• Пользовательское соглашение
-{h(settings.USER_AGREEMENT_LINK or "ссылка не задана")}
-
-• Политика конфиденциальности
-{h(settings.PRIVACY_POLICY_LINK or "ссылка не задана")}
-
-• Условия PRIME PASS
-{h(settings.PRIME_TERMS_LINK or "ссылка не задана")}"""
+• <b>Правовая информация, оплата и возврат</b>
+{h(link)}"""
 
 
 def robokassa_invoice(tariff: str, amount: int) -> str:
