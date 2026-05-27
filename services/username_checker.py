@@ -196,10 +196,14 @@ class MTProtoResolveUsernameChecker(RateLimiterMixin):
             raise UsernameCheckerNotConfigured("telethon import error") from exc
 
         try:
+            # Telethon accepts flood_sleep_threshold on the client call, not on
+            # asyncio.wait_for. Passing it to wait_for caused TypeError and made
+            # every candidate fail. Keep timeout outside and disable auto-sleep
+            # inside Telethon call so FloodWaitError is raised immediately.
+            request = ResolveUsernameRequest(username)
             await asyncio.wait_for(
-                self._client(ResolveUsernameRequest(username)),  # type: ignore[misc]
+                self._client(request, flood_sleep_threshold=0),  # type: ignore[misc]
                 timeout=self.timeout,
-                flood_sleep_threshold=0,
             )
             logger.info("MTProto resolveUsername @%s -> occupied", username)
             return False
@@ -251,7 +255,7 @@ class MTProtoResolveUsernameChecker(RateLimiterMixin):
             return False
 
         except Exception as exc:
-            logger.warning("MTProto resolve unexpected error for @%s: %s", username, exc.__class__.__name__)
+            logger.warning("MTProto resolve unexpected error for @%s: %s: %s", username, exc.__class__.__name__, str(exc)[:180])
             return False
 
 
