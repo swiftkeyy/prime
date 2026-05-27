@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from config import Settings
 from database.models import User
+from utils.referrals import make_referral_link
 from utils.formatters import h, money_rub, tariff_title
 from utils.time import format_dt, human_time_left
 
@@ -160,10 +161,11 @@ def profile(
     attempts_total: int,
     reserved_count: int = 0,
     reserved_limit: int = 10,
+    bot_username: str | None = None,
 ) -> str:
     status = "PRIME PASS" if user.is_prime else "Base"
     prime_until = format_dt(user.prime_until) if user.is_prime else "не активен"
-    link = f"https://t.me/{settings.BOT_USERNAME}?start={user.telegram_id}"
+    link = make_referral_link(bot_username or settings.BOT_USERNAME, user)
     return f"""🛡 <b>PRIME ID</b>
 
 ╭─ <b>Аккаунт</b>

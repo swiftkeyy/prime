@@ -9,12 +9,47 @@ from sqlalchemy import Select, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import Settings
-from database.models import Payment, PromoActivation, PromoCode, Search, User
+from database.models import Payment, PromoActivation, PromoCode, ReferralEvent, Search, User
 from utils.time import utcnow
 
 
 async def get_user_by_tg_id(session: AsyncSession, telegram_id: int) -> User | None:
     return await session.scalar(select(User).where(User.telegram_id == telegram_id))
+
+
+
+
+async def get_user_by_referral_code(session: AsyncSession, referral_code: str) -> User | None:
+    code = referral_code.strip()
+    if not code:
+        return None
+    return await session.scalar(select(User).where(func.lower(User.referral_code) == code.lower()))
+
+
+async def get_user_by_referral_payload(session: AsyncSession, payload: str) -> User | None:
+    value = payload.strip().lstrip("@")
+    if not value:
+        return None
+
+    # Backward compatibility: old links used telegram_id directly.
+    if value.isdigit():
+        user = await get_user_by_tg_id(session, int(value))
+        if user:
+            return user
+
+    return await get_user_by_referral_code(session, value)
+
+
+async def get_referral_event_for_referred(session: AsyncSession, referred_user_id: int) -> ReferralEvent | None:
+    return await session.scalar(
+        select(ReferralEvent).where(ReferralEvent.referred_user_id == referred_user_id)
+    )
+
+
+async def count_referrals_by_inviter(session: AsyncSession, inviter_id: int) -> int:
+    return int(
+        await session.scalar(select(func.count(ReferralEvent.id)).where(ReferralEvent.inviter_id == inviter_id)) or 0
+    )
 
 
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
@@ -34,6 +69,8 @@ async def get_or_create_user(session: AsyncSession, tg_user: TgUser, settings: S
     if user:
         user.username = tg_user.username
         user.first_name = tg_user.first_name
+        if not user.referral_code:
+            user.referral_code = str(tg_user.id)
         return user, False
 
     now = utcnow()

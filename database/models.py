@@ -40,6 +40,35 @@ class User(Base):
     payments: Mapped[list["Payment"]] = relationship(back_populates="user")
     promo_activations: Mapped[list["PromoActivation"]] = relationship(back_populates="user")
     reserved_usernames: Mapped[list["ReservedUsername"]] = relationship(back_populates="user")
+    referral_events_created: Mapped[list["ReferralEvent"]] = relationship(
+        back_populates="inviter",
+        foreign_keys="ReferralEvent.inviter_id",
+    )
+    referral_event_received: Mapped["ReferralEvent"] = relationship(
+        back_populates="referred_user",
+        foreign_keys="ReferralEvent.referred_user_id",
+        uselist=False,
+    )
+
+
+class ReferralEvent(Base):
+    __tablename__ = "referral_events"
+    __table_args__ = (UniqueConstraint("referred_user_id", name="uq_referral_events_referred_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    bonus_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    inviter: Mapped[User] = relationship(
+        back_populates="referral_events_created",
+        foreign_keys=[inviter_id],
+    )
+    referred_user: Mapped[User] = relationship(
+        back_populates="referral_event_received",
+        foreign_keys=[referred_user_id],
+    )
 
 
 class Search(Base):

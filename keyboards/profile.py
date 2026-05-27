@@ -1,12 +1,18 @@
+from urllib.parse import quote_plus
+
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 def profile_menu(ref_link: str) -> InlineKeyboardMarkup:
+    share_text = "PRIME NICK — поиск свободных Telegram username"
+    share_url = f"https://t.me/share/url?url={quote_plus(ref_link)}&text={quote_plus(share_text)}"
+
     kb = InlineKeyboardBuilder()
     kb.button(text="💠 Получить PRIME PASS", callback_data="prime:menu")
     kb.button(text="🧷 Мои резервы", callback_data="profile:reservations")
-    kb.button(text="🔗 Моя ссылка", url=ref_link)
+    kb.button(text="📤 Пригласить друга", url=share_url)
+    kb.button(text="🔗 Открыть реф-ссылку", url=ref_link)
     kb.button(text="↩️ В меню", callback_data="main:home")
     kb.adjust(1)
     return kb.as_markup()

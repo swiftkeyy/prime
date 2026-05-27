@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from database.models import User
 from keyboards.profile import profile_menu, reservations_menu
 from services.attempts import attempts_reset_left, total_attempts
 from services.prime_access import is_prime_active
+from utils.referrals import make_referral_link
 from services.reservations import (
     count_active_reservations,
     get_user_reservation_by_id,
@@ -33,12 +34,15 @@ async def safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> No
 @router.callback_query(F.data == "profile:open")
 async def open_profile(
     callback: CallbackQuery,
+    bot: Bot,
     session: AsyncSession,
     current_user: User,
     settings: Settings,
 ) -> None:
     is_prime_active(current_user)
-    link = f"https://t.me/{settings.BOT_USERNAME}?start={current_user.telegram_id}"
+    me = await bot.get_me()
+    bot_username = me.username or settings.BOT_USERNAME
+    link = make_referral_link(bot_username, current_user)
     reserved_count = await count_active_reservations(session, current_user)
     reserved_limit = reservation_limit(current_user, settings)
     await safe_edit(
@@ -50,6 +54,7 @@ async def open_profile(
             total_attempts(current_user, settings),
             reserved_count,
             reserved_limit,
+            bot_username,
         ),
         reply_markup=profile_menu(link),
     )
