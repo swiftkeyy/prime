@@ -85,6 +85,7 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
         self._client = None
         self._started = False
         self._start_lock = asyncio.Lock()
+        self._own_username: str | None = None
 
     async def start(self) -> None:
         async with self._start_lock:
@@ -109,8 +110,10 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
                     "TELEGRAM_STRING_SESSION is invalid or not authorized. "
                     "Generate it with scripts/create_telethon_session.py"
                 )
+            me = await self._client.get_me()
+            self._own_username = (getattr(me, "username", None) or "").lower() or None
             self._started = True
-            logger.info("MTProto settable username checker connected")
+            logger.info("MTProto settable username checker connected own_username=%s", self._own_username or "none")
 
     async def close(self) -> None:
         if self._client is not None:
@@ -132,6 +135,10 @@ class MTProtoSettableUsernameChecker(RateLimiterMixin):
             from telethon.tl.functions.account import CheckUsernameRequest
         except ImportError as exc:
             raise UsernameCheckError("telethon import error") from exc
+
+        if self._own_username and username.lower() == self._own_username:
+            logger.info("MTProto account.checkUsername @%s -> own username, skip", username)
+            return False
 
         try:
             result = await asyncio.wait_for(
@@ -389,7 +396,7 @@ async def is_username_available(
         return False
 
     # v4 drops all old false-positive cache records from previous checkers.
-    cache_key = f"prime_nick:username:v4:{username}"
+    cache_key = f"prime_nick:username:v5:{username}"
     if redis:
         cached = await redis.get(cache_key)
         if cached is not None:

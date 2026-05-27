@@ -26,6 +26,7 @@ from texts import (
     CUSTOM_NICK_GENERATING,
     CUSTOM_NICK_PROMPT,
     GENERATING,
+    generating_for_length,
     NOT_FOUND,
     PRIME_LOCKED,
     SEARCH_MENU,
@@ -137,16 +138,22 @@ async def custom_nick_process(
     target_count = max(1, settings.USERNAME_SUGGESTIONS_COUNT)
     candidates = generate_username_variants(seed, limit=max_candidates)
     found: list[str] = []
+    custom_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
+    deadline = asyncio.get_event_loop().time() + custom_timeout
 
     try:
         for candidate in candidates:
             if len(found) >= target_count:
                 break
+            time_left = deadline - asyncio.get_event_loop().time()
+            if time_left <= 1:
+                logger.info("custom username suggestions deadline reached seed=%s max_candidates=%s", seed, max_candidates)
+                break
             if await is_username_reserved(session, candidate):
                 continue
             available = await asyncio.wait_for(
                 is_username_available(candidate, checker=username_checker, redis=redis),
-                timeout=max(3, settings.USERNAME_CHECK_TIMEOUT + 2),
+                timeout=min(max(3, settings.USERNAME_CHECK_TIMEOUT + 2), max(1, time_left)),
             )
             if available:
                 found.append(candidate)
@@ -192,8 +199,6 @@ async def search_by_length(
         )
         return
 
-    await safe_edit(callback, GENERATING)
-
     filters = {
         "mode": "beautiful_words",
         "digits_enabled": current_user.digits_enabled,
@@ -201,13 +206,25 @@ async def search_by_length(
         "style_mode": current_user.style_mode,
         "reserved_excluded": True,
     }
-    configured_max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if is_prime_active(current_user) else settings.SEARCH_MAX_CANDIDATES
-    # Do not let a single Telegram webhook update run forever. MTProto is strict
-    # and fast; if we do not find a clean nickname within this cap, tell user to retry.
-    max_candidates = min(configured_max_candidates, 28 if is_prime_active(current_user) else 14)
+    prime_active = is_prime_active(current_user)
+    configured_max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if prime_active else settings.SEARCH_MAX_CANDIDATES
+    if length == 5 and prime_active:
+        # Short clean usernames are extremely scarce. Use a deeper scan only for PRIME 5-symbol mode.
+        max_candidates = min(max(settings.PRIME_5_SEARCH_MAX_CANDIDATES, configured_max_candidates), 90)
+        total_timeout = max(12, settings.PRIME_5_SEARCH_TOTAL_TIMEOUT_SECONDS)
+    else:
+        max_candidates = min(configured_max_candidates, 32 if prime_active else 18)
+        total_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
+
+    await safe_edit(callback, generating_for_length(length, max_candidates))
+    deadline = asyncio.get_event_loop().time() + total_timeout
 
     try:
         for _ in range(max_candidates):
+            time_left = deadline - asyncio.get_event_loop().time()
+            if time_left <= 1:
+                logger.info("username search deadline reached length=%s max_candidates=%s", length, max_candidates)
+                break
             candidate = generate_username(
                 length,
                 current_user.digits_enabled,
@@ -218,7 +235,7 @@ async def search_by_length(
                 continue
             available = await asyncio.wait_for(
                 is_username_available(candidate, checker=username_checker, redis=redis),
-                timeout=max(3, settings.USERNAME_CHECK_TIMEOUT + 2),
+                timeout=min(max(3, settings.USERNAME_CHECK_TIMEOUT + 2), max(1, time_left)),
             )
             if available:
                 consume_attempt(current_user, settings)
