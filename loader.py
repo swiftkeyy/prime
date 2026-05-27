@@ -31,6 +31,8 @@ def create_runtime(settings: Settings):
 
     dp["settings"] = settings
     dp["redis"] = redis
+    dp["engine"] = engine
+    dp["sessionmaker"] = sessionmaker
     dp["username_checker"] = username_checker
 
     dp.update.outer_middleware(LoggingMiddleware())

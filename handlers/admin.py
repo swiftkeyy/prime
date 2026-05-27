@@ -248,8 +248,8 @@ async def admin_health(
     session: AsyncSession,
     redis: Redis,
     bot: Bot,
-    engine: AsyncEngine,
     settings: Settings,
+    engine: AsyncEngine | None = None,
 ) -> None:
     if await deny(callback, settings):
         return
@@ -261,7 +261,10 @@ async def admin_health(
     try:
         await session.execute(sql_text("select 1"))
         db_ok = True
-        pool_status = engine.sync_engine.pool.status()
+        if engine is not None:
+            pool_status = engine.sync_engine.pool.status()
+        else:
+            pool_status = "engine not injected"
     except Exception as exc:  # noqa: BLE001
         pool_status = exc.__class__.__name__
     try:
