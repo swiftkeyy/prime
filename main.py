@@ -41,7 +41,8 @@ async def on_startup() -> None:
 
 
 @app.on_event("shutdown")
-async def on_shutdown():
+async def on_shutdown() -> None:
+    await dp.storage.close()
     await bot.session.close()
     await redis.aclose()
     await engine.dispose()

@@ -141,17 +141,16 @@ def username_found(username: str) -> str:
 
 
 def filters_menu(user: User) -> str:
-    digits = "включены" if user.digits_enabled else "выключены"
-    underscore = "включено" if user.underscore_enabled else "выключено"
-    style = "чистый" if user.style_mode == "clean" else "смешанный"
+    digits = "ON" if user.digits_enabled else "OFF"
+    underscore = "ON" if user.underscore_enabled else "OFF"
     return f"""🎛 <b>Фильтры PRIME NICK</b>
 
-Настрой стиль будущих username:
+Минимальные настройки генерации.
+Без лишних режимов — только то, что влияет на ник.
 
-Текущий режим:
-• Цифры: <b>{digits}</b>
-• Подчёркивание: <b>{underscore}</b>
-• Стиль: <b>{style}</b>"""
+╭─ <b>Сейчас</b>
+│ Цифры: <b>{digits}</b>
+╰ Подчёркивание: <b>{underscore}</b>"""
 
 
 def profile(user: User, settings: Settings, time_left: str, attempts_total: int) -> str:
