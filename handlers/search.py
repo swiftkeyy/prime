@@ -47,6 +47,21 @@ class CustomNickState(StatesGroup):
     waiting_seed = State()
 
 
+
+
+async def safe_callback_answer(callback: CallbackQuery, text: str | None = None, show_alert: bool = False) -> None:
+    try:
+        await callback.answer(text=text, show_alert=show_alert)
+    except TelegramBadRequest as exc:
+        error_text = str(exc).lower()
+        if (
+            "query is too old" in error_text
+            or "query id is invalid" in error_text
+            or "response timeout expired" in error_text
+        ):
+            return
+        raise
+
 async def safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> None:
     try:
         await callback.message.edit_text(text, reply_markup=reply_markup)
@@ -65,16 +80,16 @@ async def safe_message_edit(message: Message, text: str, reply_markup=None) -> N
 
 @router.callback_query(F.data == "search:menu")
 async def search_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_callback_answer(callback)
     await state.clear()
     await safe_edit(callback, SEARCH_MENU, reply_markup=kb.search_menu())
-    await callback.answer()
 
 
 @router.callback_query(F.data == "search:custom:start")
 async def custom_nick_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_callback_answer(callback)
     await state.set_state(CustomNickState.waiting_seed)
     await safe_edit(callback, CUSTOM_NICK_PROMPT, reply_markup=kb.custom_prompt())
-    await callback.answer()
 
 
 @router.message(CustomNickState.waiting_seed, F.text, ~F.text.startswith("/"))
@@ -154,11 +169,11 @@ async def search_by_length(
     username_checker: UsernameCheckerAdapter,
     redis: Redis,
 ) -> None:
+    await safe_callback_answer(callback)
     length = int(callback.data.split(":")[-1])
 
     if length == 5 and not is_prime_active(current_user):
         await safe_edit(callback, PRIME_LOCKED, reply_markup=kb.prime_locked())
-        await callback.answer()
         return
 
     if not can_search(current_user, settings):
@@ -167,11 +182,9 @@ async def search_by_length(
             attempts_limit(attempts_reset_left(current_user, settings)),
             reply_markup=kb.prime_locked(),
         )
-        await callback.answer()
         return
 
     await safe_edit(callback, GENERATING)
-    await callback.answer()
 
     filters = {
         "mode": "beautiful_words",
@@ -217,7 +230,7 @@ async def reserve_found_username(
 ) -> None:
     parts = callback.data.split(":")
     if len(parts) < 4:
-        await callback.answer("Не могу прочитать ник", show_alert=True)
+        await safe_callback_answer(callback, "Не могу прочитать ник", show_alert=True)
         return
 
     username = normalize_username(parts[2])
@@ -227,7 +240,7 @@ async def reserve_found_username(
         length = len(username)
 
     if not is_valid_username(username):
-        await callback.answer("Некорректный username", show_alert=True)
+        await safe_callback_answer(callback, "Некорректный username", show_alert=True)
         return
 
     result = await reserve_username(session, current_user, username, settings)
@@ -238,7 +251,7 @@ async def reserve_found_username(
             reserve_success(username, result.used, result.limit),
             reply_markup=kb.reserved_result(username, length),
         )
-        await callback.answer("Ник закреплён")
+        await safe_callback_answer(callback, "Ник закреплён")
         return
 
     if result.status == "already_own":
@@ -247,13 +260,13 @@ async def reserve_found_username(
             reserve_already_own(username, result.used, result.limit),
             reply_markup=kb.reserved_result(username, length),
         )
-        await callback.answer("Уже в твоём резерве")
+        await safe_callback_answer(callback, "Уже в твоём резерве")
         return
 
     if result.status == "limit":
         await safe_edit(callback, reserve_limit_reached(result.limit), reply_markup=kb.reserve_error(length))
-        await callback.answer("Лимит резервов", show_alert=True)
+        await safe_callback_answer(callback, "Лимит резервов", show_alert=True)
         return
 
     await safe_edit(callback, reserve_taken(username), reply_markup=kb.reserve_error(length))
-    await callback.answer("Уже занято", show_alert=True)
+    await safe_callback_answer(callback, "Уже занято", show_alert=True)
