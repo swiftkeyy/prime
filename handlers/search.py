@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import F, Router
@@ -125,11 +126,14 @@ async def custom_nick_process(
         "style_mode": current_user.style_mode,
         "reserved_excluded": True,
     }
-    max_candidates = (
+    configured_max_candidates = (
         settings.PRIME_USERNAME_SUGGESTIONS_MAX_CANDIDATES
         if is_prime_active(current_user)
         else settings.USERNAME_SUGGESTIONS_MAX_CANDIDATES
     )
+    # Hard cap: webhook handlers must finish fast. One custom request checks
+    # several real Telegram usernames, so do not let env values make it hang.
+    max_candidates = min(configured_max_candidates, 45 if is_prime_active(current_user) else 25)
     target_count = max(1, settings.USERNAME_SUGGESTIONS_COUNT)
     candidates = generate_username_variants(seed, limit=max_candidates)
     found: list[str] = []
@@ -140,9 +144,13 @@ async def custom_nick_process(
                 break
             if await is_username_reserved(session, candidate):
                 continue
-            if await is_username_available(candidate, checker=username_checker, redis=redis):
+            available = await asyncio.wait_for(
+                is_username_available(candidate, checker=username_checker, redis=redis),
+                timeout=max(3, settings.USERNAME_CHECK_TIMEOUT + 2),
+            )
+            if available:
                 found.append(candidate)
-    except UsernameCheckError:
+    except (UsernameCheckError, asyncio.TimeoutError):
         logger.warning("username checker temporarily unavailable for custom suggestions")
         await add_search(session, current_user, None, len(seed), filters, "checker_error")
         await state.clear()
@@ -193,7 +201,10 @@ async def search_by_length(
         "style_mode": current_user.style_mode,
         "reserved_excluded": True,
     }
-    max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if is_prime_active(current_user) else settings.SEARCH_MAX_CANDIDATES
+    configured_max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if is_prime_active(current_user) else settings.SEARCH_MAX_CANDIDATES
+    # Do not let a single Telegram webhook update run forever. MTProto is strict
+    # and fast; if we do not find a clean nickname within this cap, tell user to retry.
+    max_candidates = min(configured_max_candidates, 28 if is_prime_active(current_user) else 14)
 
     try:
         for _ in range(max_candidates):
@@ -205,12 +216,16 @@ async def search_by_length(
             )
             if await is_username_reserved(session, candidate):
                 continue
-            if await is_username_available(candidate, checker=username_checker, redis=redis):
+            available = await asyncio.wait_for(
+                is_username_available(candidate, checker=username_checker, redis=redis),
+                timeout=max(3, settings.USERNAME_CHECK_TIMEOUT + 2),
+            )
+            if available:
                 consume_attempt(current_user, settings)
                 await add_search(session, current_user, candidate, length, filters, "found")
                 await safe_edit(callback, username_found(candidate), reply_markup=kb.result(candidate, length))
                 return
-    except UsernameCheckError:
+    except (UsernameCheckError, asyncio.TimeoutError):
         logger.warning("username checker temporarily unavailable")
         await add_search(session, current_user, None, length, filters, "checker_error")
         await safe_edit(callback, CHECK_UNAVAILABLE, reply_markup=kb.retry(length))
