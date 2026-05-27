@@ -41,12 +41,7 @@ async def on_startup() -> None:
 
 
 @app.on_event("shutdown")
-async def on_shutdown() -> None:
-    try:
-        await bot.delete_webhook(drop_pending_updates=False)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("delete webhook failed: %s", exc.__class__.__name__)
-    await dp.storage.close()
+async def on_shutdown():
     await bot.session.close()
     await redis.aclose()
     await engine.dispose()
