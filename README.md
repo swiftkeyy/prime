@@ -157,3 +157,24 @@ Features:
 - Run behind HTTPS on Railway.
 - Keep `WEBHOOK_SECRET` random and private.
 - Robokassa Result URL is the only trusted confirmation source.
+
+## PRIME ADMIN 2.0
+
+Админка открывается командой `/admin` только для Telegram ID из `ADMIN_IDS`.
+
+Что добавлено:
+
+- `📊 Командный центр` — users/search/money/growth метрики, RUB и Stars выручка, hit-rate, PRIME conversion.
+- `🩺 Health` — проверка PostgreSQL, Redis, webhook URL, pending updates и pool status.
+- `👥 Пользователи` — сегменты: новые, PRIME, топ по поискам, топ по рефералам.
+- `👤 PRIME USER CARD` — подробная карточка пользователя с быстрыми действиями.
+- Быстрая выдача PRIME: `+1 день`, `+7 дней`, `+30 дней`, `навсегда`, снятие PRIME.
+- Управление попытками: `+5`, `+20`, reset free attempts, zero attempts.
+- История поиска и платежи конкретного пользователя.
+- `🎟 PROMO CONTROL` — создание, список активных, отключение промокодов.
+- `💳 PAYMENT RADAR` — фильтры платежей: все, оплаченные, созданные, pending, failed.
+- `🧬 Последние поиски` — последние результаты проверки username.
+- `📢 BROADCAST CORE` — рассылка по аудитории: все, PRIME, Base; с прогрессом и логированием ошибок.
+- `🧩 Runtime Control` — безопасное хранение runtime-флагов в таблице `settings` через `key=value`.
+
+Для Railway используется `start.sh`: сначала `alembic upgrade head`, потом запуск `python main.py` через `exec`, чтобы контейнер оставался Active.

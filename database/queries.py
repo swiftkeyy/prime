@@ -163,3 +163,169 @@ async def recent_payments(session: AsyncSession, limit: int = 10) -> list[Paymen
 async def all_user_telegram_ids(session: AsyncSession) -> list[int]:
     result = await session.scalars(select(User.telegram_id).order_by(User.id.asc()))
     return list(result)
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin center queries
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def admin_dashboard(session: AsyncSession) -> dict[str, Any]:
+    now = utcnow()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+
+    users_total = await session.scalar(select(func.count(User.id))) or 0
+    users_today = await session.scalar(select(func.count(User.id)).where(User.created_at >= day_start)) or 0
+    users_week = await session.scalar(select(func.count(User.id)).where(User.created_at >= week_start)) or 0
+    prime_active = await session.scalar(
+        select(func.count(User.id)).where(User.is_prime.is_(True), User.prime_until >= now)
+    ) or 0
+    prime_expired_flagged = await session.scalar(
+        select(func.count(User.id)).where(User.is_prime.is_(True), User.prime_until < now)
+    ) or 0
+
+    searches_total = await session.scalar(select(func.count(Search.id))) or 0
+    searches_today = await session.scalar(select(func.count(Search.id)).where(Search.created_at >= day_start)) or 0
+    searches_week = await session.scalar(select(func.count(Search.id)).where(Search.created_at >= week_start)) or 0
+    found_total = await session.scalar(select(func.count(Search.id)).where(Search.status == "found")) or 0
+    not_found_total = await session.scalar(select(func.count(Search.id)).where(Search.status != "found")) or 0
+
+    payments_paid = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "paid")) or 0
+    payments_pending = await session.scalar(select(func.count(Payment.id)).where(Payment.status.in_(["created", "pending"]))) or 0
+    rub_revenue = await session.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.status == "paid", Payment.currency == "RUB")
+    ) or Decimal("0")
+    stars_revenue = await session.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.status == "paid", Payment.currency == "XTR")
+    ) or Decimal("0")
+
+    active_promos = await session.scalar(select(func.count(PromoCode.id)).where(PromoCode.is_active.is_(True))) or 0
+    promo_activations = await session.scalar(select(func.count(PromoActivation.id))) or 0
+    referrals_total = await session.scalar(select(func.coalesce(func.sum(User.referrals_count), 0))) or 0
+
+    return {
+        "users_total": users_total,
+        "users_today": users_today,
+        "users_week": users_week,
+        "prime_active": prime_active,
+        "prime_expired_flagged": prime_expired_flagged,
+        "base_users": max(0, users_total - prime_active),
+        "searches_total": searches_total,
+        "searches_today": searches_today,
+        "searches_week": searches_week,
+        "found_total": found_total,
+        "not_found_total": not_found_total,
+        "payments_paid": payments_paid,
+        "payments_pending": payments_pending,
+        "rub_revenue": rub_revenue,
+        "stars_revenue": stars_revenue,
+        "active_promos": active_promos,
+        "promo_activations": promo_activations,
+        "referrals_total": referrals_total,
+    }
+
+
+async def admin_users_page(session: AsyncSession, mode: str = "latest", page: int = 0, limit: int = 8) -> tuple[list[User], int]:
+    now = utcnow()
+    page = max(0, page)
+    offset = page * limit
+    stmt = select(User)
+    count_stmt = select(func.count(User.id))
+
+    if mode == "prime":
+        stmt = stmt.where(User.is_prime.is_(True), User.prime_until >= now).order_by(User.prime_until.desc(), User.id.desc())
+        count_stmt = count_stmt.where(User.is_prime.is_(True), User.prime_until >= now)
+    elif mode == "top_searches":
+        stmt = stmt.order_by(User.total_searches.desc(), User.id.desc())
+    elif mode == "top_refs":
+        stmt = stmt.order_by(User.referrals_count.desc(), User.id.desc())
+    else:
+        stmt = stmt.order_by(User.created_at.desc(), User.id.desc())
+
+    total = await session.scalar(count_stmt) or 0
+    result = await session.scalars(stmt.offset(offset).limit(limit))
+    return list(result), int(total)
+
+
+async def admin_recent_searches(session: AsyncSession, limit: int = 12) -> list[tuple[Search, int | None]]:
+    stmt = (
+        select(Search, User.telegram_id)
+        .join(User, Search.user_id == User.id)
+        .order_by(Search.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def admin_user_searches(session: AsyncSession, user: User, limit: int = 10) -> list[Search]:
+    result = await session.scalars(
+        select(Search).where(Search.user_id == user.id).order_by(Search.created_at.desc()).limit(limit)
+    )
+    return list(result)
+
+
+async def admin_user_payments(session: AsyncSession, user: User, limit: int = 10) -> list[Payment]:
+    result = await session.scalars(
+        select(Payment).where(Payment.user_id == user.id).order_by(Payment.created_at.desc()).limit(limit)
+    )
+    return list(result)
+
+
+async def admin_recent_payments(session: AsyncSession, status: str = "all", limit: int = 12) -> list[tuple[Payment, int | None]]:
+    stmt = select(Payment, User.telegram_id).join(User, Payment.user_id == User.id)
+    if status != "all":
+        stmt = stmt.where(Payment.status == status)
+    stmt = stmt.order_by(Payment.created_at.desc()).limit(limit)
+    result = await session.execute(stmt)
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def admin_target_user_ids(session: AsyncSession, audience: str = "all") -> list[int]:
+    now = utcnow()
+    stmt = select(User.telegram_id).order_by(User.id.asc())
+    if audience == "prime":
+        stmt = stmt.where(User.is_prime.is_(True), User.prime_until >= now)
+    elif audience == "base":
+        stmt = stmt.where((User.is_prime.is_(False)) | (User.prime_until < now))
+    result = await session.scalars(stmt)
+    return list(result)
+
+
+async def admin_promos_page(session: AsyncSession, active_only: bool = True, limit: int = 12) -> list[PromoCode]:
+    stmt = select(PromoCode).order_by(PromoCode.created_at.desc()).limit(limit)
+    if active_only:
+        stmt = stmt.where(PromoCode.is_active.is_(True))
+    result = await session.scalars(stmt)
+    return list(result)
+
+
+async def admin_get_promo_by_id(session: AsyncSession, promo_id: int) -> PromoCode | None:
+    return await session.get(PromoCode, promo_id)
+
+
+async def admin_deactivate_promo(session: AsyncSession, promo_id: int) -> PromoCode | None:
+    promo = await admin_get_promo_by_id(session, promo_id)
+    if promo:
+        promo.is_active = False
+        await session.flush()
+    return promo
+
+
+async def admin_settings_list(session: AsyncSession, limit: int = 30) -> list[Setting]:
+    from database.models import Setting
+
+    result = await session.scalars(select(Setting).order_by(Setting.key.asc()).limit(limit))
+    return list(result)
+
+
+async def admin_upsert_setting(session: AsyncSession, key: str, value: str) -> Setting:
+    from database.models import Setting
+
+    key = key.strip()
+    item = await session.scalar(select(Setting).where(Setting.key == key))
+    if item:
+        item.value = value
+    else:
+        item = Setting(key=key, value=value)
+        session.add(item)
+    await session.flush()
+    return item
