@@ -1,5 +1,5 @@
 {
   "deploy": {
-    "startCommand": "python main.py"
+    "startCommand": "alembic upgrade head && python main.py"
   }
 }
