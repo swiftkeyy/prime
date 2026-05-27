@@ -52,7 +52,7 @@ class RateLimiterMixin:
     def __init__(self, delay_seconds: float) -> None:
         # Do not let Railway env accidentally spam Telegram. 0.35 sec is still fast
         # enough for UX, but much safer than bursts.
-        self.delay_seconds = max(0.35, float(delay_seconds))
+        self.delay_seconds = max(0.75, float(delay_seconds))
         self._lock = asyncio.Lock()
         self._last_request = 0.0
 
@@ -141,6 +141,7 @@ class MTProtoResolveUsernameChecker(RateLimiterMixin):
                 connection_retries=2,
                 request_retries=0,
                 timeout=self.timeout,
+                flood_sleep_threshold=0,
             )
             await self._client.connect()
             if not await self._client.is_user_authorized():
@@ -151,7 +152,7 @@ class MTProtoResolveUsernameChecker(RateLimiterMixin):
             me = await self._client.get_me()
             self._own_username = (getattr(me, "username", None) or "").lower() or None
             self._started = True
-            logger.info("MTProto resolveUsername checker connected own_username=%s", self._own_username or "none")
+            logger.info("MTProto resolveUsername controlled-flood checker connected own_username=%s", self._own_username or "none")
 
     async def close(self) -> None:
         if self._client is not None:
@@ -198,6 +199,7 @@ class MTProtoResolveUsernameChecker(RateLimiterMixin):
             await asyncio.wait_for(
                 self._client(ResolveUsernameRequest(username)),  # type: ignore[misc]
                 timeout=self.timeout,
+                flood_sleep_threshold=0,
             )
             logger.info("MTProto resolveUsername @%s -> occupied", username)
             return False
@@ -284,7 +286,7 @@ def build_checker(settings: Settings) -> UsernameCheckerAdapter:
         return MockUsernameChecker()
 
     if _has_mtproto_credentials(settings):
-        logger.info("Using MTProto resolveUsername no-flood checker")
+        logger.info("Using MTProto resolveUsername controlled-flood checker")
         return _build_mtproto_checker(settings)
 
     reason = (
@@ -307,8 +309,8 @@ async def is_username_available(
     if not is_valid_username(username):
         return False
 
-    # v8 drops old account.checkUsername FloodWait/Fragment false-positive cache.
-    cache_key = f"prime_nick:username:v8:{username}"
+    # v9 disables Telethon auto-sleep on flood waits and drops old flood-prone cache.
+    cache_key = f"prime_nick:username:v9:{username}"
     if redis:
         cached = await redis.get(cache_key)
         if cached is not None:

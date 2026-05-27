@@ -18,7 +18,7 @@ from keyboards import search as kb
 from services.attempts import attempts_reset_left, can_search, consume_attempt
 from services.prime_access import is_prime_active
 from services.reservations import is_username_reserved, reserve_username
-from services.username_checker import UsernameCheckError, UsernameCheckerAdapter, is_username_available
+from services.username_checker import UsernameCheckError, UsernameCheckerAdapter, UsernameCheckerNotConfigured, is_username_available
 from services.username_generator import generate_username, generate_username_variants, normalize_username_seed
 from texts import (
     CHECK_UNAVAILABLE,
@@ -134,35 +134,38 @@ async def custom_nick_process(
     )
     # Hard cap: webhook handlers must finish fast. One custom request checks
     # several real Telegram usernames, so do not let env values make it hang.
-    max_candidates = min(configured_max_candidates, 45 if is_prime_active(current_user) else 25)
+    max_candidates = min(configured_max_candidates, 18 if is_prime_active(current_user) else 12)
     target_count = max(1, settings.USERNAME_SUGGESTIONS_COUNT)
     candidates = generate_username_variants(seed, limit=max_candidates)
     found: list[str] = []
     custom_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
     deadline = asyncio.get_event_loop().time() + custom_timeout
 
-    try:
-        for candidate in candidates:
-            if len(found) >= target_count:
-                break
-            time_left = deadline - asyncio.get_event_loop().time()
-            if time_left <= 1:
-                logger.info("custom username suggestions deadline reached seed=%s max_candidates=%s", seed, max_candidates)
-                break
-            if await is_username_reserved(session, candidate):
-                continue
+    for candidate in candidates:
+        if len(found) >= target_count:
+            break
+        time_left = deadline - asyncio.get_event_loop().time()
+        if time_left <= 1:
+            logger.info("custom username suggestions deadline reached seed=%s max_candidates=%s", seed, max_candidates)
+            break
+        if await is_username_reserved(session, candidate):
+            continue
+        try:
             available = await asyncio.wait_for(
                 is_username_available(candidate, checker=username_checker, redis=redis),
                 timeout=min(max(3, settings.USERNAME_CHECK_TIMEOUT + 2), max(1, time_left)),
             )
-            if available:
-                found.append(candidate)
-    except (UsernameCheckError, asyncio.TimeoutError):
-        logger.warning("username checker temporarily unavailable for custom suggestions")
-        await add_search(session, current_user, None, len(seed), filters, "checker_error")
-        await state.clear()
-        await safe_message_edit(status_message, CHECK_UNAVAILABLE, reply_markup=kb.custom_prompt())
-        return
+        except UsernameCheckerNotConfigured:
+            logger.warning("username checker is not configured for custom suggestions")
+            await add_search(session, current_user, None, len(seed), filters, "checker_error")
+            await state.clear()
+            await safe_message_edit(status_message, CHECK_UNAVAILABLE, reply_markup=kb.custom_prompt())
+            return
+        except (UsernameCheckError, asyncio.TimeoutError) as exc:
+            logger.warning("skip custom candidate @%s after checker error: %s", candidate, exc.__class__.__name__)
+            continue
+        if available:
+            found.append(candidate)
 
     consume_attempt(current_user, settings)
     await add_search(session, current_user, found[0] if found else None, len(seed), filters, "custom_found" if found else "custom_not_found")
@@ -210,43 +213,46 @@ async def search_by_length(
     configured_max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if prime_active else settings.SEARCH_MAX_CANDIDATES
     if length == 5 and prime_active:
         # Short clean usernames are extremely scarce. Use a deeper scan only for PRIME 5-symbol mode.
-        max_candidates = min(max(settings.PRIME_5_SEARCH_MAX_CANDIDATES, configured_max_candidates), 90)
+        max_candidates = min(max(settings.PRIME_5_SEARCH_MAX_CANDIDATES, configured_max_candidates), 28)
         total_timeout = max(12, settings.PRIME_5_SEARCH_TOTAL_TIMEOUT_SECONDS)
     else:
-        max_candidates = min(configured_max_candidates, 32 if prime_active else 18)
+        max_candidates = min(configured_max_candidates, 16 if prime_active else 10)
         total_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
 
     await safe_edit(callback, generating_for_length(length, max_candidates))
     deadline = asyncio.get_event_loop().time() + total_timeout
 
-    try:
-        for _ in range(max_candidates):
-            time_left = deadline - asyncio.get_event_loop().time()
-            if time_left <= 1:
-                logger.info("username search deadline reached length=%s max_candidates=%s", length, max_candidates)
-                break
-            candidate = generate_username(
-                length,
-                current_user.digits_enabled,
-                current_user.underscore_enabled,
-                current_user.style_mode,
-            )
-            if await is_username_reserved(session, candidate):
-                continue
+    for _ in range(max_candidates):
+        time_left = deadline - asyncio.get_event_loop().time()
+        if time_left <= 1:
+            logger.info("username search deadline reached length=%s max_candidates=%s", length, max_candidates)
+            break
+        candidate = generate_username(
+            length,
+            current_user.digits_enabled,
+            current_user.underscore_enabled,
+            current_user.style_mode,
+        )
+        if await is_username_reserved(session, candidate):
+            continue
+        try:
             available = await asyncio.wait_for(
                 is_username_available(candidate, checker=username_checker, redis=redis),
                 timeout=min(max(3, settings.USERNAME_CHECK_TIMEOUT + 2), max(1, time_left)),
             )
-            if available:
-                consume_attempt(current_user, settings)
-                await add_search(session, current_user, candidate, length, filters, "found")
-                await safe_edit(callback, username_found(candidate), reply_markup=kb.result(candidate, length))
-                return
-    except (UsernameCheckError, asyncio.TimeoutError):
-        logger.warning("username checker temporarily unavailable")
-        await add_search(session, current_user, None, length, filters, "checker_error")
-        await safe_edit(callback, CHECK_UNAVAILABLE, reply_markup=kb.retry(length))
-        return
+        except UsernameCheckerNotConfigured:
+            logger.warning("username checker is not configured")
+            await add_search(session, current_user, None, length, filters, "checker_error")
+            await safe_edit(callback, CHECK_UNAVAILABLE, reply_markup=kb.retry(length))
+            return
+        except (UsernameCheckError, asyncio.TimeoutError) as exc:
+            logger.warning("skip candidate @%s after checker error: %s", candidate, exc.__class__.__name__)
+            continue
+        if available:
+            consume_attempt(current_user, settings)
+            await add_search(session, current_user, candidate, length, filters, "found")
+            await safe_edit(callback, username_found(candidate), reply_markup=kb.result(candidate, length))
+            return
 
     consume_attempt(current_user, settings)
     await add_search(session, current_user, None, length, filters, "not_found")
