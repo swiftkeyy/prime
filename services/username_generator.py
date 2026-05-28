@@ -266,6 +266,12 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
 
     result: list[str] = []
     seen: set[str] = set()
+    short_stem = base[: max(3, len(base) - 2)]
+    alt_stem = re.sub(r"[aeiouy]", "", base)[:6] or base[:4]
+    phonetic = (
+        base.replace("ph", "f").replace("sh", "s").replace("zh", "z").replace("ch", "k")
+        .replace("ya", "ia").replace("yo", "io").replace("yu", "iu")
+    )
 
     def add(value: str) -> None:
         if len(result) < limit:
@@ -274,6 +280,8 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
     # Direct and clean options first. They will be filtered by the strict checker.
     add(base)
     add(base.replace("0", "o").replace("1", "i").replace("3", "e").replace("4", "a"))
+    add(short_stem)
+    add(phonetic)
 
     endings = [
         "x", "y", "io", "go", "ov", "ev", "off", "one", "on", "er", "or", "id",
@@ -287,8 +295,11 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
 
     for suffix in endings:
         add(base + suffix)
+        add(short_stem + suffix)
+        add(alt_stem + suffix)
     for prefix in prefixes:
         add(prefix + base)
+        add(prefix + short_stem)
 
     if len(base) >= 4:
         for infix in infixes:
@@ -301,10 +312,16 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
         add(base[:-1] + "x")
         add(base[:-1] + "o")
         add(base[:-1] + "a")
+        add(short_stem + "ix")
+        add(short_stem + "ov")
+        add(short_stem + "ex")
+        add(short_stem + "er")
 
     if len(base) >= 4:
         for suffix in brand_suffixes:
             add(base[: max(3, len(base) - 1)] + suffix)
+            add(short_stem + suffix)
+            add(alt_stem + suffix)
 
     if base.endswith(("a", "e", "i", "o", "u", "y")):
         stem = base[:-1]
@@ -318,6 +335,8 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
     for src, dst in swaps:
         if src in base:
             add(base.replace(src, dst, 1))
+        if src in short_stem:
+            add(short_stem.replace(src, dst, 1))
 
     leet_swaps = [("a", "4"), ("e", "3"), ("i", "1"), ("o", "0"), ("s", "5")]
     for src, dst in leet_swaps:
@@ -330,6 +349,16 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
             compact = "n" + compact
         for suffix in ["io", "ov", "on", "er", "x", "y", "ix", "ex"]:
             add(compact + suffix)
+
+    if len(base) >= 4:
+        for prefix in ["v", "z", "n", "k", "l", "r"]:
+            add(prefix + short_stem)
+            add(prefix + alt_stem)
+
+    if len(base) >= 5:
+        for suffix in ["ik", "ok", "ka", "ko", "en", "in", "an"]:
+            add(base[:3] + suffix)
+            add(short_stem + suffix)
 
     stem = base[:12]
     for suffix in ["nova", "luna", "vibe", "wave", "flow", "core", "line", "space", "gram"]:
