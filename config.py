@@ -44,9 +44,9 @@ class Settings(BaseSettings):
     ROBOKASSA_PASSWORD_2: str = ""
     ROBOKASSA_TEST_MODE: bool = True
 
-    LEGAL_INFO_LINK: str = "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
-    USER_AGREEMENT_LINK: str = ""
-    PRIVACY_POLICY_LINK: str = ""
+    LEGAL_INFO_LINK: str = ""
+    USER_AGREEMENT_LINK: str = "https://telegra.ph/Polzovatelskoe-soglashenie-PRIME-NICK-05-27"
+    PRIVACY_POLICY_LINK: str = "https://telegra.ph/Politika-konfidencialnosti-PRIME-NICK-05-27"
     PRIME_TERMS_LINK: str = ""
 
     USERNAME_CHECK_MODE: Literal["http", "mock", "fragment", "mtproto"] = "mtproto"

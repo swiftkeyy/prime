@@ -239,13 +239,16 @@ def attempts_limit(time_left: str) -> str:
 
 
 def rules(settings: Settings) -> str:
-    link = getattr(settings, "LEGAL_INFO_LINK", "") or "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
-    return f"""🗂 <b>Правовая информация PRIME NICK</b>
+    user_agreement = (getattr(settings, "USER_AGREEMENT_LINK", "") or "https://telegra.ph/Polzovatelskoe-soglashenie-PRIME-NICK-05-27").strip()
+    privacy_policy = (getattr(settings, "PRIVACY_POLICY_LINK", "") or "https://telegra.ph/Politika-konfidencialnosti-PRIME-NICK-05-27").strip()
 
-Перед использованием сервиса ознакомься с документом:
+    return f"""📄 <b>Документы PRIME NICK</b>
 
-• <b>Правовая информация, оплата и возврат</b>
-{h(link)}"""
+🔹 <b>Пользовательское соглашение:</b>
+{h(user_agreement)}
+
+🔹 <b>Политика конфиденциальности:</b>
+{h(privacy_policy)}"""
 
 
 def robokassa_invoice(tariff: str, amount: int) -> str:
