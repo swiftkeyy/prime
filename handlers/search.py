@@ -18,6 +18,7 @@ from keyboards.prime import prime_locked_cta
 from services.attempts import attempts_reset_left, can_search, consume_attempt
 from services.prime_access import is_prime_active
 from services.reservations import is_username_reserved, reserve_username
+from services.username_stock import take_available_username
 from services.username_checker import (
     UsernameCheckError,
     UsernameCheckerAdapter,
