@@ -18,7 +18,6 @@ from keyboards.prime import prime_locked_cta
 from services.attempts import attempts_reset_left, can_search, consume_attempt
 from services.prime_access import is_prime_active
 from services.reservations import is_username_reserved, reserve_username
-from services.username_stock import take_available_username
 from services.username_checker import (
     UsernameCheckError,
     UsernameCheckerAdapter,
@@ -33,7 +32,6 @@ from texts import (
     CUSTOM_NICK_BAD_INPUT,
     CUSTOM_NICK_GENERATING,
     CUSTOM_NICK_PROMPT,
-    CUSTOM_STOCK_EMPTY,
     GENERATING,
     generating_for_length,
     NOT_FOUND,
@@ -130,42 +128,10 @@ async def custom_nick_process(
     candidates = generate_username_variants(seed, limit=max_candidates)
     found: list[str] = []
 
-    # Production-safe path: serve only from pre-verified local stock.
-    # This prevents every user click from burning MTProto requests and causing
-    # 10-20 hour flood waits on Telegram accounts.
-    if settings.USERNAME_STOCK_ENABLED:
-        for length in sorted({len(candidate) for candidate in candidates}):
-            if len(found) >= target_count:
-                break
-            for _ in range(target_count - len(found)):
-                stock = await take_available_username(
-                    session,
-                    current_user,
-                    length,
-                    settings=settings,
-                    digits_enabled=current_user.digits_enabled,
-                    underscore_enabled=current_user.underscore_enabled,
-                    seed=seed,
-                )
-                if not stock.username:
-                    break
-                if stock.username not in found:
-                    found.append(stock.username)
-
-        if found:
-            consume_attempt(current_user, settings)
-            await add_search(session, current_user, found[0], len(seed), filters | {"source": "stock"}, "custom_found")
-            await state.clear()
-            await safe_message_edit(status_message, custom_nick_results(seed, found), reply_markup=kb.custom_results(found))
-            return
-
-        if not settings.USERNAME_CUSTOM_LIVE_CHECK_ENABLED:
-            await add_search(session, current_user, None, len(seed), filters | {"source": "stock"}, "stock_empty")
-            await state.clear()
-            await safe_message_edit(status_message, CUSTOM_STOCK_EMPTY, reply_markup=kb.custom_prompt())
-            return
-
     custom_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
+    if is_prime_active(current_user):
+        max_candidates = min(max_candidates, 5)
+        custom_timeout = min(custom_timeout, 10)
     deadline = asyncio.get_event_loop().time() + custom_timeout
 
     for candidate in candidates:
