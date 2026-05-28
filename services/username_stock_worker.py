@@ -49,6 +49,7 @@ async def username_stock_worker(
                 6: settings.USERNAME_STOCK_MIN_6,
                 7: settings.USERNAME_STOCK_MIN_7,
             }
+            clean_five_target = max(2, targets[5] // 3)
             counts: dict[int, int] = {}
             clean_five_count = 0
             async with sessionmaker() as session:
@@ -63,23 +64,41 @@ async def username_stock_worker(
                 await session.commit()
 
             deficits = {item_length: targets[item_length] - counts[item_length] for item_length in (5, 6, 7)}
-            if max(deficits.values()) <= 0:
+            clean_five_deficit = clean_five_target - clean_five_count
+            if max(deficits.values()) <= 0 and clean_five_deficit <= 0:
+                logger.info(
+                    "Username stock worker idle stock_5=%s stock_6=%s stock_7=%s clean_5=%s",
+                    counts[5],
+                    counts[6],
+                    counts[7],
+                    clean_five_count,
+                )
                 await asyncio.sleep(max(2.0, settings.USERNAME_STOCK_CHECK_INTERVAL_SECONDS))
                 continue
 
             # Fill the emptiest bucket first. PRIME 5-symbol results are the most
             # visible feature, so ties prefer 5, then 6, then 7.
-            length = max((5, 6, 7), key=lambda item_length: (deficits[item_length], -item_length))
+            if clean_five_deficit > 0:
+                length = 5
+            else:
+                length = max((5, 6, 7), key=lambda item_length: (deficits[item_length], -item_length))
 
             # 5-char demand is split into two very different buckets:
             # clean usernames for users with digits OFF and mixed usernames for users
             # with digits ON. Warm both, otherwise the clean pool stays near-zero.
-            if length == 5 and clean_five_count < max(2, targets[5] // 3):
+            if length == 5 and clean_five_deficit > 0:
                 digits = False
                 style_mode = "clean"
+                logger.info("warming clean 5-char")
             else:
                 digits = length == 5
                 style_mode = "mixed" if digits else "clean"
+                if length == 5:
+                    logger.info("warming mixed 5-char")
+                elif length == 6:
+                    logger.info("warming 6-char")
+                else:
+                    logger.info("warming 7-char")
 
             candidate = generate_username(length, digits_enabled=digits, underscore_enabled=False, style_mode=style_mode)
 
