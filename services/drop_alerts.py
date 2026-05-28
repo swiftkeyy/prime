@@ -16,6 +16,7 @@ QUEUE_KEY = "prime_nick:drop_alerts:queue"
 SEEN_PREFIX = "prime_nick:drop_alerts:seen:"
 COOLDOWN_PREFIX = "prime_nick:drop_alerts:cooldown:"
 DIGEST_PREFIX = "prime_nick:drop_alerts:digest:"
+RUNTIME_ENABLED_KEY = "prime_nick:runtime:drop_alerts_enabled"
 
 
 async def subscribe_drop_alerts(redis: Redis, telegram_id: int) -> None:
@@ -65,6 +66,11 @@ async def drop_alerts_worker(bot: Bot, redis: Redis, settings: Settings) -> None
     logger.info("Drop alerts worker started interval=%ss", settings.DROP_ALERTS_INTERVAL_SECONDS)
     while True:
         try:
+            runtime_enabled = await redis.get(RUNTIME_ENABLED_KEY)
+            if runtime_enabled in {"0", b"0", "false", b"false"}:
+                await asyncio.sleep(max(10, settings.DROP_ALERTS_INTERVAL_SECONDS))
+                continue
+
             usernames: list[str] = []
             for _ in range(max(1, settings.DROP_ALERTS_BATCH_SIZE)):
                 value = await redis.lpop(QUEUE_KEY)

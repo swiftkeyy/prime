@@ -26,6 +26,13 @@ BROADCAST_AUDIENCES = {
 
 def admin_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(text="🧠 War Room", callback_data="admin:war_room")
+    kb.button(text="📡 Live Feed", callback_data="admin:live_feed")
+    kb.button(text="📦 Stock Brain", callback_data="admin:stock")
+    kb.button(text="🚨 Alert Center", callback_data="admin:alerts")
+    kb.button(text="📈 Growth Lab", callback_data="admin:growth")
+    kb.button(text="⚡ One-Tap Ops", callback_data="admin:ops")
+    kb.button(text="🔗 Referral Control", callback_data="admin:referrals")
     kb.button(text="📊 Командный центр", callback_data="admin:stats")
     kb.button(text="🩺 Health", callback_data="admin:health")
     kb.button(text="👥 Пользователи", callback_data="admin:users")
@@ -38,7 +45,18 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb.button(text="📢 Рассылка", callback_data="admin:broadcast")
     kb.button(text="🧩 Runtime", callback_data="admin:settings")
     kb.button(text="↩️ Закрыть", callback_data="main:home")
-    kb.adjust(2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1, 2, 2, 2, 2, 2, 1, 1)
+    return kb.as_markup()
+
+
+def ops_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="♻️ Release holds", callback_data="admin:ops:release_holds")
+    kb.button(text="🧹 Clear username cache", callback_data="admin:ops:clear_username_cache")
+    kb.button(text="🔔 Drop alerts OFF", callback_data="admin:ops:drop_alerts_off")
+    kb.button(text="🔔 Drop alerts ON", callback_data="admin:ops:drop_alerts_on")
+    kb.button(text="↩️ Назад", callback_data="admin:menu")
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 

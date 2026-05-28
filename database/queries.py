@@ -9,7 +9,7 @@ from sqlalchemy import Select, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import Settings
-from database.models import Payment, PromoActivation, PromoCode, ReferralEvent, Search, User
+from database.models import Payment, PromoActivation, PromoCode, ReferralEvent, Search, User, UsernameStock
 from utils.time import utcnow
 
 
@@ -209,6 +209,121 @@ async def best_user_searches(session: AsyncSession, user: User, limit: int = 8) 
         .order_by(Search.created_at.desc(), Search.id.desc())
         .limit(limit)
     )
+    return list(result)
+
+
+async def admin_stock_snapshot(session: AsyncSession) -> dict[str, int]:
+    now = utcnow()
+    result = await session.scalars(
+        select(UsernameStock).where(UsernameStock.expires_at > now)
+    )
+    items = list(result)
+    clean_5 = mixed_5 = stock_6 = stock_7 = issued = reserved = rejected = 0
+    for item in items:
+        username = item.username or ""
+        if item.status == "issued":
+            issued += 1
+        elif item.status == "reserved":
+            reserved += 1
+        elif item.status == "rejected":
+            rejected += 1
+
+        if item.status != "available":
+            continue
+        if item.length == 5:
+            if any(ch.isdigit() for ch in username):
+                mixed_5 += 1
+            else:
+                clean_5 += 1
+        elif item.length == 6:
+            stock_6 += 1
+        elif item.length == 7:
+            stock_7 += 1
+
+    return {
+        "clean_5": clean_5,
+        "mixed_5": mixed_5,
+        "stock_6": stock_6,
+        "stock_7": stock_7,
+        "issued": issued,
+        "reserved": reserved,
+        "rejected": rejected,
+    }
+
+
+async def admin_search_diagnostics(session: AsyncSession, hours: int = 24) -> dict[str, int]:
+    since = utcnow() - timedelta(hours=hours)
+    rows = await session.execute(
+        select(Search.status, func.count(Search.id))
+        .where(Search.created_at >= since)
+        .group_by(Search.status)
+    )
+    data = {str(status): int(count) for status, count in rows.all()}
+    return {
+        "found": data.get("found", 0) + data.get("custom_found", 0),
+        "not_found": data.get("not_found", 0) + data.get("custom_not_found", 0),
+        "stock_empty": data.get("stock_empty", 0),
+        "checker_rate_limited": data.get("checker_rate_limited", 0),
+        "checker_error": data.get("checker_error", 0),
+    }
+
+
+async def admin_live_feed(session: AsyncSession, limit: int = 15) -> list[tuple[str, str, datetime]]:
+    feed: list[tuple[str, str, datetime]] = []
+
+    searches = await session.execute(
+        select(User.telegram_id, Search.status, Search.username_result, Search.created_at)
+        .join(User, Search.user_id == User.id)
+        .order_by(Search.created_at.desc())
+        .limit(limit)
+    )
+    for tg_id, status, username_result, created_at in searches.all():
+        uname = f" @{username_result}" if username_result else ""
+        feed.append(("search", f"<code>{tg_id}</code> · {status}{uname}", created_at))
+
+    payments = await session.execute(
+        select(User.telegram_id, Payment.status, Payment.method, Payment.created_at)
+        .join(User, Payment.user_id == User.id)
+        .order_by(Payment.created_at.desc())
+        .limit(limit)
+    )
+    for tg_id, status, method, created_at in payments.all():
+        feed.append(("payment", f"<code>{tg_id}</code> · {status} · {method}", created_at))
+
+    referrals = await session.execute(
+        select(ReferralEvent.inviter_id, ReferralEvent.referred_user_id, ReferralEvent.created_at)
+        .order_by(ReferralEvent.created_at.desc())
+        .limit(limit)
+    )
+    for inviter_id, referred_user_id, created_at in referrals.all():
+        feed.append(("referral", f"inviter={inviter_id} -> referred={referred_user_id}", created_at))
+
+    feed.sort(key=lambda item: item[2], reverse=True)
+    return feed[:limit]
+
+
+async def admin_growth_lab(session: AsyncSession) -> dict[str, Any]:
+    now = utcnow()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+    today_paid = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "paid", Payment.created_at >= day_start)) or 0
+    week_paid = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "paid", Payment.created_at >= week_start)) or 0
+    today_refs = await session.scalar(select(func.count(ReferralEvent.id)).where(ReferralEvent.created_at >= day_start)) or 0
+    week_refs = await session.scalar(select(func.count(ReferralEvent.id)).where(ReferralEvent.created_at >= week_start)) or 0
+    prime_users = await session.scalar(select(func.count(User.id)).where(User.is_prime.is_(True), User.prime_until >= now)) or 0
+    users_total = await session.scalar(select(func.count(User.id))) or 0
+    return {
+        "today_paid": int(today_paid),
+        "week_paid": int(week_paid),
+        "today_refs": int(today_refs),
+        "week_refs": int(week_refs),
+        "prime_users": int(prime_users),
+        "users_total": int(users_total),
+    }
+
+
+async def admin_recent_referrals(session: AsyncSession, limit: int = 12) -> list[ReferralEvent]:
+    result = await session.scalars(select(ReferralEvent).order_by(ReferralEvent.created_at.desc()).limit(limit))
     return list(result)
 # ─────────────────────────────────────────────────────────────────────────────
 # Admin center queries

@@ -18,12 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from config import Settings
 from database.models import User
 from database.queries import (
+    admin_growth_lab,
+    admin_live_feed,
+    admin_recent_referrals,
     admin_dashboard,
     admin_deactivate_promo,
     admin_promos_page,
     admin_recent_payments,
     admin_recent_searches,
+    admin_search_diagnostics,
     admin_settings_list,
+    admin_stock_snapshot,
     admin_target_user_ids,
     admin_upsert_setting,
     admin_user_payments,
@@ -47,6 +52,7 @@ from keyboards.admin import (
     prime_control_kb,
     promo_list_kb,
     promo_menu,
+    ops_kb,
     searches_kb,
     settings_kb,
     user_card_kb,
@@ -64,6 +70,7 @@ from services.pricing import (
     price_key,
     set_prime_price,
 )
+from services.username_stock import release_expired_stock_holds
 from utils.formatters import h, money_rub, tariff_title
 from utils.time import format_dt, utcnow
 from utils.validators import normalize_promo
@@ -202,6 +209,182 @@ async def admin_home(callback: CallbackQuery, settings: Settings) -> None:
     if await deny(callback, settings):
         return
     await safe_edit(callback, admin_home_text(), admin_menu())
+
+
+@router.callback_query(F.data == "admin:war_room")
+async def admin_war_room(callback: CallbackQuery, session: AsyncSession, redis: Redis, bot: Bot, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    stock = await admin_stock_snapshot(session)
+    diag = await admin_search_diagnostics(session, hours=24)
+    db_ok = redis_ok = webhook_ok = False
+    pending = "—"
+    try:
+        await session.execute(sql_text("select 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    try:
+        redis_ok = bool(await redis.ping())
+    except Exception:
+        redis_ok = False
+    try:
+        info = await bot.get_webhook_info()
+        pending = str(info.pending_update_count)
+        webhook_ok = (info.url or "") == settings.webhook_url
+    except Exception:
+        webhook_ok = False
+    text = f"""🧠 <b>WAR ROOM</b>
+
+╭─ <b>Runtime</b>
+│ DB: <b>{'OK' if db_ok else 'FAIL'}</b>
+│ Redis: <b>{'OK' if redis_ok else 'FAIL'}</b>
+│ Webhook: <b>{'OK' if webhook_ok else 'CHECK'}</b>
+╰ Pending: <b>{pending}</b>
+
+╭─ <b>Stock</b>
+│ 5 clean: <b>{stock['clean_5']}</b>
+│ 5 mixed: <b>{stock['mixed_5']}</b>
+│ 6-char: <b>{stock['stock_6']}</b>
+╰ 7-char: <b>{stock['stock_7']}</b>
+
+╭─ <b>Search 24h</b>
+│ Found: <b>{diag['found']}</b>
+│ Not found: <b>{diag['not_found']}</b>
+│ Stock empty: <b>{diag['stock_empty']}</b>
+╰ Checker limits: <b>{diag['checker_rate_limited']}</b>"""
+    await safe_edit(callback, text, admin_close_back())
+
+
+@router.callback_query(F.data == "admin:stock")
+async def admin_stock_brain(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    stock = await admin_stock_snapshot(session)
+    text = f"""📦 <b>STOCK BRAIN</b>
+
+╭─ <b>Available</b>
+│ 5 clean: <b>{stock['clean_5']}</b>
+│ 5 mixed: <b>{stock['mixed_5']}</b>
+│ 6-char: <b>{stock['stock_6']}</b>
+╰ 7-char: <b>{stock['stock_7']}</b>
+
+╭─ <b>Internal states</b>
+│ Issued: <b>{stock['issued']}</b>
+│ Reserved: <b>{stock['reserved']}</b>
+╰ Rejected: <b>{stock['rejected']}</b>"""
+    await safe_edit(callback, text, admin_close_back())
+
+
+@router.callback_query(F.data == "admin:alerts")
+async def admin_alert_center(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    stock = await admin_stock_snapshot(session)
+    diag = await admin_search_diagnostics(session, hours=24)
+    alerts: list[str] = []
+    if stock["clean_5"] < max(2, settings.USERNAME_STOCK_MIN_5 // 3):
+        alerts.append("• clean 5-char stock ниже целевого уровня")
+    if stock["stock_6"] < settings.USERNAME_STOCK_MIN_6:
+        alerts.append("• 6-char stock ниже target")
+    if stock["stock_7"] < settings.USERNAME_STOCK_MIN_7:
+        alerts.append("• 7-char stock ниже target")
+    if diag["checker_rate_limited"] > 0:
+        alerts.append("• были checker rate limits за 24ч")
+    if diag["checker_error"] > 0:
+        alerts.append("• были checker errors за 24ч")
+    text = "🚨 <b>ALERT CENTER</b>\n\n" + ("\n".join(alerts) if alerts else "Критичных сигналов сейчас нет.")
+    await safe_edit(callback, text, admin_close_back())
+
+
+@router.callback_query(F.data == "admin:growth")
+async def admin_growth(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    g = await admin_growth_lab(session)
+    prime_cr = 0.0 if not g["users_total"] else (g["prime_users"] / g["users_total"]) * 100
+    text = f"""📈 <b>GROWTH LAB</b>
+
+╭─ <b>Money</b>
+│ Paid today: <b>{g['today_paid']}</b>
+╰ Paid 7d: <b>{g['week_paid']}</b>
+
+╭─ <b>Referrals</b>
+│ Today: <b>{g['today_refs']}</b>
+╰ 7d: <b>{g['week_refs']}</b>
+
+╭─ <b>Conversion</b>
+│ Users total: <b>{g['users_total']}</b>
+│ PRIME active: <b>{g['prime_users']}</b>
+╰ PRIME CR: <b>{prime_cr:.1f}%</b>"""
+    await safe_edit(callback, text, admin_close_back())
+
+
+@router.callback_query(F.data == "admin:live_feed")
+async def admin_live_feed_screen(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    items = await admin_live_feed(session, limit=15)
+    lines = ["📡 <b>LIVE FEED</b>"]
+    if not items:
+        lines.append("\nЛента пока пустая.")
+    for kind, payload, created_at in items:
+        lines.append(f"\n[{h(kind)}] {payload}\n{format_dt(created_at)}")
+    await safe_edit(callback, "\n".join(lines), admin_close_back())
+
+
+@router.callback_query(F.data == "admin:referrals")
+async def admin_referrals(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    items = await admin_recent_referrals(session, limit=12)
+    lines = ["🔗 <b>REFERRAL CONTROL</b>"]
+    if not items:
+        lines.append("\nРеферальных событий пока нет.")
+    for item in items:
+        lines.append(
+            f"\ninviter_id=<code>{item.inviter_id}</code> -> referred_id=<code>{item.referred_user_id}</code>\n"
+            f"bonus=<b>{item.bonus_attempts}</b> · {format_dt(item.created_at)}"
+        )
+    await safe_edit(callback, "\n".join(lines), admin_close_back())
+
+
+@router.callback_query(F.data == "admin:ops")
+async def admin_ops(callback: CallbackQuery, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    text = """⚡ <b>ONE-TAP OPERATIONS</b>
+
+Быстрые сервисные действия для поддержки runtime без похода в консоль."""
+    await safe_edit(callback, text, ops_kb())
+
+
+@router.callback_query(F.data.regexp(r"^admin:ops:(release_holds|clear_username_cache|drop_alerts_off|drop_alerts_on)$"))
+async def admin_ops_action(callback: CallbackQuery, session: AsyncSession, redis: Redis, settings: Settings) -> None:
+    if await deny(callback, settings):
+        return
+    action = callback.data.split(":")[-1]
+    if action == "release_holds":
+        released = await release_expired_stock_holds(session)
+        text = f"✅ Expired holds released: <b>{released}</b>"
+    elif action == "clear_username_cache":
+        deleted = 0
+        cursor = 0
+        pattern = "prime_nick:username:v12:*"
+        while True:
+            cursor, keys = await redis.scan(cursor=cursor, match=pattern, count=200)
+            if keys:
+                deleted += await redis.delete(*keys)
+            if cursor == 0:
+                break
+        text = f"✅ Username cache cleared: <b>{deleted}</b>"
+    elif action == "drop_alerts_off":
+        await redis.set("prime_nick:runtime:drop_alerts_enabled", "0")
+        text = "✅ Drop alerts runtime flag set to OFF"
+    else:
+        await redis.set("prime_nick:runtime:drop_alerts_enabled", "1")
+        text = "✅ Drop alerts runtime flag set to ON"
+    await safe_edit(callback, text, ops_kb(), answer="Готово")
 
 
 @router.callback_query(F.data == "admin:stats")
