@@ -10,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import Settings
 from database.models import ReservedUsername, Search, User, UsernameStock
 from keyboards.discovery import back_discovery, collections_menu, discovery_menu
+from keyboards.prime import prime_locked_cta
 from redis.asyncio import Redis
 from services.drop_alerts import is_subscribed_to_drop_alerts, subscribe_drop_alerts, unsubscribe_drop_alerts
+from services.prime_access import is_prime_active
 from services.username_score import rarity_line
+from texts import PRIME_LAB_LOCKED
 from utils.referrals import make_referral_link
 from utils.telegram import safe_callback_answer, safe_edit_callback
 from utils.time import utcnow
@@ -29,8 +32,17 @@ COLLECTIONS = {
 }
 
 
+def _prime_lab_denied() -> tuple[str, object]:
+    return PRIME_LAB_LOCKED, prime_locked_cta()
+
+
 @router.callback_query(F.data == "discover:menu")
-async def discover_menu(callback: CallbackQuery) -> None:
+async def discover_menu(callback: CallbackQuery, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     text = """🧪 <b>PRIME Lab</b>
 
 Витрина премиальных механик PRIME NICK.
@@ -47,7 +59,12 @@ async def discover_menu(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "discover:collections")
-async def show_collections(callback: CallbackQuery) -> None:
+async def show_collections(callback: CallbackQuery, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     text = """🧬 <b>Умные коллекции</b>
 
 Выбери настроение username.
@@ -57,7 +74,12 @@ async def show_collections(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("discover:collection:"))
-async def collection_detail(callback: CallbackQuery) -> None:
+async def collection_detail(callback: CallbackQuery, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     key = callback.data.split(":")[-1]
     title, description = COLLECTIONS.get(key, COLLECTIONS["brand"])
     examples = {
@@ -81,7 +103,12 @@ async def collection_detail(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "discover:drops")
-async def daily_drops(callback: CallbackQuery, session: AsyncSession) -> None:
+async def daily_drops(callback: CallbackQuery, session: AsyncSession, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     now = utcnow()
     result = await session.scalars(
         select(UsernameStock)
@@ -103,7 +130,12 @@ async def daily_drops(callback: CallbackQuery, session: AsyncSession) -> None:
 
 
 @router.callback_query(F.data == "discover:weekly")
-async def weekly_top(callback: CallbackQuery, session: AsyncSession) -> None:
+async def weekly_top(callback: CallbackQuery, session: AsyncSession, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     week_start = utcnow() - timedelta(days=7)
     result = await session.scalars(
         select(Search.username_result)
@@ -135,6 +167,11 @@ async def weekly_top(callback: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data == "discover:alerts")
 async def drop_alerts_toggle(callback: CallbackQuery, redis: Redis, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     subscribed = await is_subscribed_to_drop_alerts(redis, current_user.telegram_id)
     if subscribed:
         await unsubscribe_drop_alerts(redis, current_user.telegram_id)
@@ -153,7 +190,12 @@ async def drop_alerts_toggle(callback: CallbackQuery, redis: Redis, current_user
 
 
 @router.callback_query(F.data == "discover:pulse")
-async def prime_pulse(callback: CallbackQuery, session: AsyncSession) -> None:
+async def prime_pulse(callback: CallbackQuery, session: AsyncSession, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
     now = utcnow()
     day_start = now - timedelta(hours=24)
     users = await session.scalar(select(func.count(User.id))) or 0
@@ -178,8 +220,15 @@ async def prime_pulse(callback: CallbackQuery, session: AsyncSession) -> None:
 
 
 @router.callback_query(F.data == "discover:referrals")
-async def referral_boost(callback: CallbackQuery, current_user: User, settings: Settings) -> None:
-    link = make_referral_link(settings.BOT_USERNAME, current_user)
+async def referral_boost(callback: CallbackQuery, bot, current_user: User, settings: Settings) -> None:
+    if not is_prime_active(current_user):
+        text, markup = _prime_lab_denied()
+        await safe_edit_callback(callback, text, reply_markup=markup)
+        await safe_callback_answer(callback)
+        return
+    me = await bot.get_me()
+    bot_username = me.username or settings.BOT_USERNAME
+    link = make_referral_link(bot_username, current_user)
     text = f"""🔗 <b>Реферальный буст</b>
 
 Приглашай людей и усиливай аккаунт дополнительными попытками поиска.

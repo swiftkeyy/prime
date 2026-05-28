@@ -33,3 +33,11 @@ def prime_success() -> InlineKeyboardMarkup:
     kb.button(text="🛡 Мой профиль", callback_data="profile:open")
     kb.adjust(1)
     return kb.as_markup()
+
+
+def prime_locked_cta() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💠 Открыть PRIME PASS", callback_data="prime:menu")
+    kb.button(text="🏠 В меню", callback_data="main:home")
+    kb.adjust(1)
+    return kb.as_markup()

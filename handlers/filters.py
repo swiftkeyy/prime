@@ -5,7 +5,9 @@ from aiogram.types import CallbackQuery
 
 from database.models import User
 from keyboards.filters import filters_menu as filters_kb
-from texts import filters_menu
+from keyboards.prime import prime_locked_cta
+from services.prime_access import is_prime_active
+from texts import STYLE_LOCKED, filters_menu
 from utils.telegram import safe_callback_answer, safe_edit_callback
 
 router = Router(name="filters")
@@ -40,6 +42,10 @@ async def toggle_underscore(callback: CallbackQuery, current_user: User) -> None
 
 @router.callback_query(F.data == "filters:style")
 async def toggle_style(callback: CallbackQuery, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        await safe_edit_callback(callback, STYLE_LOCKED, reply_markup=prime_locked_cta())
+        await safe_callback_answer(callback)
+        return
     styles = ["clean", "soft", "brand", "brutal", "techno", "mixed"]
     try:
         current_index = styles.index(current_user.style_mode)

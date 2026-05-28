@@ -10,7 +10,13 @@ from config import Settings
 from services.drop_alerts import enqueue_drop_alert
 from services.username_checker import UsernameCheckerAdapter, UsernameCheckerNotConfigured, UsernameCheckerRateLimited, is_username_available
 from services.username_generator import generate_username
-from services.username_stock import count_available_stock, mark_username_rejected, release_expired_stock_holds, upsert_available_username
+from services.username_stock import (
+    count_available_stock,
+    count_available_stock_matching,
+    mark_username_rejected,
+    release_expired_stock_holds,
+    upsert_available_username,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +50,16 @@ async def username_stock_worker(
                 7: settings.USERNAME_STOCK_MIN_7,
             }
             counts: dict[int, int] = {}
+            clean_five_count = 0
             async with sessionmaker() as session:
                 for item_length in (5, 6, 7):
                     counts[item_length] = await count_available_stock(session, item_length)
+                clean_five_count = await count_available_stock_matching(
+                    session,
+                    5,
+                    digits_enabled=False,
+                    underscore_enabled=False,
+                )
                 await session.commit()
 
             deficits = {item_length: targets[item_length] - counts[item_length] for item_length in (5, 6, 7)}
@@ -57,13 +70,18 @@ async def username_stock_worker(
             # Fill the emptiest bucket first. PRIME 5-symbol results are the most
             # visible feature, so ties prefer 5, then 6, then 7.
             length = max((5, 6, 7), key=lambda item_length: (deficits[item_length], -item_length))
-            target = targets[length]
-            current = counts[length]
 
-            # Worker may use digits for 5 chars to build useful stock. Pure 5-letter
-            # usernames are nearly impossible in 2026.
-            digits = length == 5
-            candidate = generate_username(length, digits_enabled=digits, underscore_enabled=False, style_mode="mixed" if digits else "clean")
+            # 5-char demand is split into two very different buckets:
+            # clean usernames for users with digits OFF and mixed usernames for users
+            # with digits ON. Warm both, otherwise the clean pool stays near-zero.
+            if length == 5 and clean_five_count < max(2, targets[5] // 3):
+                digits = False
+                style_mode = "clean"
+            else:
+                digits = length == 5
+                style_mode = "mixed" if digits else "clean"
+
+            candidate = generate_username(length, digits_enabled=digits, underscore_enabled=False, style_mode=style_mode)
 
             try:
                 available = await is_username_available(candidate, checker=username_checker, redis=redis, positive_ttl=60, negative_ttl=1800)

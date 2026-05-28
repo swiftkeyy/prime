@@ -68,6 +68,24 @@ async def count_available_stock(session: AsyncSession, length: int) -> int:
     )
 
 
+async def count_available_stock_matching(
+    session: AsyncSession,
+    length: int,
+    *,
+    digits_enabled: bool,
+    underscore_enabled: bool,
+) -> int:
+    now = utcnow()
+    result = await session.scalars(
+        select(UsernameStock.username).where(
+            UsernameStock.length == length,
+            UsernameStock.status == "available",
+            UsernameStock.expires_at > now,
+        )
+    )
+    return sum(1 for username in result if _matches_filters(str(username), digits_enabled=digits_enabled, underscore_enabled=underscore_enabled))
+
+
 async def take_available_username(
     session: AsyncSession,
     user: User,

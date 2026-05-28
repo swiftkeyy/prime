@@ -14,6 +14,7 @@ from config import Settings
 from database.models import User
 from database.queries import add_search
 from keyboards import search as kb
+from keyboards.prime import prime_locked_cta
 from services.attempts import attempts_reset_left, can_search, consume_attempt
 from services.prime_access import is_prime_active
 from services.reservations import is_username_reserved, reserve_username
@@ -28,6 +29,7 @@ from services.username_checker import (
 from services.username_generator import generate_username, generate_username_variants, normalize_username_seed
 from texts import (
     CHECK_UNAVAILABLE,
+    CUSTOM_SEARCH_LOCKED,
     CUSTOM_NICK_BAD_INPUT,
     CUSTOM_NICK_GENERATING,
     CUSTOM_NICK_PROMPT,
@@ -73,7 +75,11 @@ async def search_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "search:custom:start")
-async def custom_nick_start(callback: CallbackQuery, state: FSMContext) -> None:
+async def custom_nick_start(callback: CallbackQuery, state: FSMContext, current_user: User) -> None:
+    if not is_prime_active(current_user):
+        await safe_callback_answer(callback)
+        await safe_edit(callback, CUSTOM_SEARCH_LOCKED, reply_markup=prime_locked_cta())
+        return
     await safe_callback_answer(callback)
     await state.set_state(CustomNickState.waiting_seed)
     await safe_edit(callback, CUSTOM_NICK_PROMPT, reply_markup=kb.custom_prompt())
@@ -237,6 +243,8 @@ async def search_by_length(
         "reserved_excluded": True,
     }
     prime_active = is_prime_active(current_user)
+    search_digits_enabled = current_user.digits_enabled
+    search_style_mode = current_user.style_mode
     configured_max_candidates = settings.PRIME_SEARCH_MAX_CANDIDATES if prime_active else settings.SEARCH_MAX_CANDIDATES
     if length == 5 and prime_active:
         # Short clean usernames are extremely scarce. Use a deeper scan only for PRIME 5-symbol mode.
@@ -254,7 +262,7 @@ async def search_by_length(
             current_user,
             length,
             settings=settings,
-            digits_enabled=current_user.digits_enabled,
+            digits_enabled=search_digits_enabled,
             underscore_enabled=current_user.underscore_enabled,
         )
 
@@ -280,9 +288,9 @@ async def search_by_length(
             break
         candidate = generate_username(
             length,
-            current_user.digits_enabled,
+            search_digits_enabled,
             current_user.underscore_enabled,
-            current_user.style_mode,
+            search_style_mode,
         )
         if await is_username_reserved(session, candidate):
             continue
