@@ -162,7 +162,7 @@ async def custom_nick_process(
                     current_user,
                     length,
                     settings=settings,
-                    digits_enabled=True,
+                    digits_enabled=current_user.digits_enabled,
                     underscore_enabled=current_user.underscore_enabled,
                     seed=seed,
                 )
@@ -283,22 +283,7 @@ async def search_by_length(
             underscore_enabled=current_user.underscore_enabled,
         )
 
-        # 5-symbol usernames without digits are almost always unavailable. The
-        # stock worker intentionally fills useful 5-char variants with digits,
-        # so PRIME 5-symbol mode should be able to serve them even when the
-        # user's digit filter is OFF. This avoids an empty screen while keeping
-        # the result strictly pre-verified.
-        if not stock.username and length == 5 and not current_user.digits_enabled:
-            stock = await take_available_username(
-                session,
-                current_user,
-                length,
-                settings=settings,
-                digits_enabled=True,
-                underscore_enabled=current_user.underscore_enabled,
-            )
-            if stock.username:
-                filters["digits_auto_fallback"] = True
+        # Filters are strict: if digits are OFF, stock items with digits are not issued.
 
         if stock.username:
             consume_attempt(current_user, settings)
