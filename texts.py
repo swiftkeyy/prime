@@ -266,13 +266,18 @@ def attempts_limit(time_left: str) -> str:
 
 
 def rules(settings: Settings) -> str:
-    link = getattr(settings, "LEGAL_INFO_LINK", "") or "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
-    return f"""🗂 <b>Правовая информация PRIME NICK</b>
+    user_agreement_link = getattr(settings, "USER_AGREEMENT_LINK", "") or "не указано"
+    privacy_policy_link = getattr(settings, "PRIVACY_POLICY_LINK", "") or "не указано"
 
-Перед использованием сервиса ознакомься с документом:
+    return f"""📄 <b>Правовая информация PRIME NICK</b>
 
-• <b>Правовая информация, оплата и возврат</b>
-{h(link)}"""
+Перед использованием сервиса ознакомься с документами:
+
+<b>Пользовательское соглашение:</b>
+{user_agreement_link}
+
+<b>Политика конфиденциальности:</b>
+{privacy_policy_link}"""
 
 
 def platega_invoice(tariff: str, amount: int) -> str:

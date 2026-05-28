@@ -44,7 +44,6 @@ class Settings(BaseSettings):
     PLATEGA_SECRET: str = ""
     PLATEGA_PAYMENT_METHOD: int = 2
 
-    LEGAL_INFO_LINK: str = "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
     USER_AGREEMENT_LINK: str = ""
     PRIVACY_POLICY_LINK: str = ""
     PRIME_TERMS_LINK: str = ""
