@@ -26,7 +26,7 @@ from services.username_checker import (
     UsernameCheckerRateLimited,
     is_username_available,
 )
-from services.username_generator import generate_username, generate_username_variants, normalize_username_seed
+from services.username_generator import generate_username, generate_username_variants, generate_username_variants_deep, normalize_username_seed
 from texts import (
     CHECK_UNAVAILABLE,
     CUSTOM_SEARCH_LOCKED,
@@ -127,6 +127,7 @@ async def custom_nick_process(
     max_candidates = min(configured_max_candidates, 12 if is_prime_active(current_user) else 6)
     target_count = max(1, settings.USERNAME_SUGGESTIONS_COUNT)
     candidates = generate_username_variants(seed, limit=max_candidates)
+    logger.info("custom search seed=%s initial_candidates=%s sample=%s", seed, len(candidates), ",".join(candidates[:8]))
     found: list[str] = []
 
     custom_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
@@ -135,7 +136,14 @@ async def custom_nick_process(
         custom_timeout = min(custom_timeout, 14)
     deadline = asyncio.get_event_loop().time() + custom_timeout
 
-    for candidate in candidates:
+    all_candidates = list(candidates)
+    deep_candidates = generate_username_variants_deep(seed, limit=max(max_candidates * 2, 20))
+    for candidate in deep_candidates:
+        if candidate not in all_candidates:
+            all_candidates.append(candidate)
+    logger.info("custom search seed=%s deep_candidates=%s sample=%s", seed, len(all_candidates), ",".join(all_candidates[:12]))
+
+    for candidate in all_candidates:
         if len(found) >= target_count:
             break
         time_left = deadline - asyncio.get_event_loop().time()

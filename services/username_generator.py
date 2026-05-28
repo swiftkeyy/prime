@@ -374,3 +374,40 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
             add(base + suffix)
 
     return result[:limit]
+
+
+def generate_username_variants_deep(seed: str, limit: int = 160) -> list[str]:
+    base = normalize_username_seed(seed)
+    if not base:
+        return []
+
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        if len(result) < limit:
+            _append_if_valid(result, seen, value)
+
+    short = base[: max(3, len(base) - 2)]
+    compact = re.sub(r"[aeiouy]", "", base)[:5] or base[:4]
+    soft = base.replace("u", "o").replace("i", "e").replace("y", "i")
+    hard = base.replace("s", "z").replace("c", "k").replace("ph", "f")
+
+    stems = [base, short, compact, soft, hard]
+    tails = ["ix", "ex", "ox", "io", "ia", "ova", "ora", "ero", "aro", "ium", "ify", "ist", "up", "go"]
+    heads = ["x", "z", "v", "n", "k", "neo", "pro", "get", "my"]
+
+    for stem in stems:
+        add(stem)
+        add(stem[::-1])
+        add(stem[:3] + stem[-2:])
+        for tail in tails:
+            add(stem + tail)
+        for head in heads:
+            add(head + stem)
+        if len(stem) >= 4:
+            add(stem[:2] + "x" + stem[-2:])
+            add(stem[:2] + "o" + stem[-2:])
+            add(stem[:2] + "i" + stem[-2:])
+
+    return result[:limit]
