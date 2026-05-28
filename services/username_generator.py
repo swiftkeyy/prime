@@ -279,13 +279,32 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
         "x", "y", "io", "go", "ov", "ev", "off", "one", "on", "er", "or", "id",
         "ly", "to", "me", "way", "flow", "line", "wave", "net", "hub", "lab", "zone",
         "sky", "prime", "nick", "real", "core", "nova", "max", "pro", "ix", "ex", "rx",
+        "up", "top", "gram", "ster", "ify", "able", "now", "base", "jet", "box",
     ]
-    prefixes = ["i", "x", "go", "my", "the", "neo", "mr", "dr", "top", "one", "hey", "iam"]
+    prefixes = ["i", "x", "go", "my", "the", "neo", "mr", "dr", "top", "one", "hey", "iam", "get", "its"]
+    infixes = ["o", "a", "e", "io", "ix", "ex", "ux", "ify", "ly", "up"]
+    brand_suffixes = ["ova", "era", "ora", "aro", "ixo", "exa", "ivo", "ium", "ora", "ary"]
 
     for suffix in endings:
         add(base + suffix)
     for prefix in prefixes:
         add(prefix + base)
+
+    if len(base) >= 4:
+        for infix in infixes:
+            split = max(2, len(base) // 2)
+            add(base[:split] + infix + base[split:])
+
+    if len(base) >= 5:
+        add(base[:-1])
+        add(base[1:])
+        add(base[:-1] + "x")
+        add(base[:-1] + "o")
+        add(base[:-1] + "a")
+
+    if len(base) >= 4:
+        for suffix in brand_suffixes:
+            add(base[: max(3, len(base) - 1)] + suffix)
 
     if base.endswith(("a", "e", "i", "o", "u", "y")):
         stem = base[:-1]
@@ -300,6 +319,11 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
         if src in base:
             add(base.replace(src, dst, 1))
 
+    leet_swaps = [("a", "4"), ("e", "3"), ("i", "1"), ("o", "0"), ("s", "5")]
+    for src, dst in leet_swaps:
+        if src in base and not base.startswith(src):
+            add(base.replace(src, dst, 1))
+
     compact = re.sub(r"[aeiouy]", "", base)
     if len(compact) >= 3:
         if not compact[0].isalpha():
@@ -310,6 +334,11 @@ def generate_username_variants(seed: str, limit: int = 160) -> list[str]:
     stem = base[:12]
     for suffix in ["nova", "luna", "vibe", "wave", "flow", "core", "line", "space", "gram"]:
         add(stem + suffix)
+
+    if 5 <= len(base) <= 8:
+        add(base[::-1])
+        add(base[:3] + base[-2:])
+        add(base[:2] + "x" + base[-2:])
 
     if len(base) < 5:
         for suffix in ["nick", "flow", "line", "zone", "prime", "wave", "core"]:

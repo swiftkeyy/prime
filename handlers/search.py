@@ -123,15 +123,15 @@ async def custom_nick_process(
     )
     # Hard cap: webhook handlers must finish fast. One custom request checks
     # several real Telegram usernames, so do not let env values make it hang.
-    max_candidates = min(configured_max_candidates, 8 if is_prime_active(current_user) else 5)
+    max_candidates = min(configured_max_candidates, 12 if is_prime_active(current_user) else 6)
     target_count = max(1, settings.USERNAME_SUGGESTIONS_COUNT)
     candidates = generate_username_variants(seed, limit=max_candidates)
     found: list[str] = []
 
     custom_timeout = max(8, settings.SEARCH_TOTAL_TIMEOUT_SECONDS)
     if is_prime_active(current_user):
-        max_candidates = min(max_candidates, 5)
-        custom_timeout = min(custom_timeout, 10)
+        max_candidates = min(max_candidates, 10)
+        custom_timeout = min(custom_timeout, 14)
     deadline = asyncio.get_event_loop().time() + custom_timeout
 
     for candidate in candidates:
