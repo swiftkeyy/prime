@@ -172,7 +172,7 @@ def broadcast_confirm(audience: str = "all") -> InlineKeyboardMarkup:
 
 def prices_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="💳 RUB / Robokassa", callback_data="admin:prices:robokassa")
+    kb.button(text="💳 RUB / Platega", callback_data="admin:prices:platega")
     kb.button(text="⭐ Telegram Stars", callback_data="admin:prices:stars")
     kb.button(text="📋 Все цены", callback_data="admin:prices")
     kb.button(text="↩️ Назад", callback_data="admin:menu")

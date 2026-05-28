@@ -4,7 +4,6 @@ import asyncio
 import logging
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -49,6 +48,7 @@ from texts import (
     reserve_taken,
     username_found,
 )
+from utils.telegram import safe_callback_answer, safe_edit_callback, safe_edit_message
 from utils.validators import is_valid_username, normalize_username
 
 logger = logging.getLogger(__name__)
@@ -57,37 +57,12 @@ router = Router(name="search")
 
 class CustomNickState(StatesGroup):
     waiting_seed = State()
-
-
-
-
-async def safe_callback_answer(callback: CallbackQuery, text: str | None = None, show_alert: bool = False) -> None:
-    try:
-        await callback.answer(text=text, show_alert=show_alert)
-    except TelegramBadRequest as exc:
-        error_text = str(exc).lower()
-        if (
-            "query is too old" in error_text
-            or "query id is invalid" in error_text
-            or "response timeout expired" in error_text
-        ):
-            return
-        raise
-
 async def safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> None:
-    try:
-        await callback.message.edit_text(text, reply_markup=reply_markup)
-    except TelegramBadRequest as exc:
-        if "message is not modified" not in str(exc).lower():
-            raise
+    await safe_edit_callback(callback, text, reply_markup=reply_markup)
 
 
 async def safe_message_edit(message: Message, text: str, reply_markup=None) -> None:
-    try:
-        await message.edit_text(text, reply_markup=reply_markup)
-    except TelegramBadRequest as exc:
-        if "message is not modified" not in str(exc).lower():
-            raise
+    await safe_edit_message(message, text, reply_markup=reply_markup)
 
 
 @router.callback_query(F.data == "search:menu")

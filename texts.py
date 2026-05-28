@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from config import Settings
 from database.models import User
+from services.username_score import rarity_line
 from utils.referrals import make_referral_link
 from utils.formatters import h, money_rub, tariff_title
 from utils.time import format_dt, human_time_left
@@ -10,18 +11,18 @@ BRAND = "PRIME NICK"
 
 WELCOME = """⚡ <b>PRIME NICK</b>
 
-Умный сканер свободных Telegram username.
+Премиальный сервис для поиска сильных Telegram username.
 
-Находи короткие ники, проверяй доступность и забирай лучшие варианты раньше других.
+Находи редкие короткие ники, проверяй доступность и забирай лучшие варианты раньше остальных.
 
-Выбери действие ниже:"""
+Выбери следующий шаг:"""
 
 SEARCH_MENU = """🔎 <b>Режим сканирования</b>
 
 Выбери длину username.
-Чем короче ник — тем выше его ценность.
+Чем короче и чище ник, тем выше его ценность и визуальный вес.
 
-Доступные режимы:"""
+Доступные режимы поиска:"""
 
 PRIME_LOCKED = """⛔ <b>Закрытый режим</b>
 
@@ -36,7 +37,7 @@ PRIME_LOCKED = """⛔ <b>Закрытый режим</b>
 
 GENERATING = """🧬 <b>Запускаю генерацию...</b>
 
-Проверяю свободные username и отбираю подходящий вариант."""
+Проверяю свободные username и отбираю самый сильный вариант под текущие фильтры."""
 
 
 def generating_for_length(length: int, max_candidates: int) -> str:
@@ -51,13 +52,13 @@ def generating_for_length(length: int, max_candidates: int) -> str:
 NOT_FOUND = """⏳ <b>Ничего подходящего</b>
 
 Свободный username не найден в текущем режиме.
-Для 5 символов это нормально: короткие чистые ники почти всегда заняты. Попробуй включить цифры в фильтрах или запусти повторный скан."""
+Для 5 символов это нормально: сильные короткие ники почти всегда заняты. Попробуй включить цифры, сменить стиль или запустить повторный скан."""
 
 STOCK_EMPTY = """⏳ <b>Пул свободных ников пополняется</b>
 
-Бот выдаёт только заранее проверенные username, чтобы не показывать мусор и занятые ники.
+Бот выдаёт только заранее проверенные username, чтобы в витрину не попадали слабые или занятые варианты.
 
-Для 5 символов чаще всего проходят варианты с цифрами. Если только что был деплой — дай воркеру несколько минут прогреть пул."""
+Для 5 символов чаще всего проходят варианты с цифрами. Если только что был деплой, дай воркеру несколько минут прогреть stock."""
 
 CUSTOM_STOCK_EMPTY = """⏳ <b>Подбор пока пустой</b>
 
@@ -111,7 +112,7 @@ PRIME_ACTIVATED = """✅ <b>PRIME PASS активирован</b>
 • расширенные фильтры
 • приоритетная связь"""
 
-ROBOKASSA_SUCCESS = """✅ <b>Оплата получена</b>
+PLATEGA_SUCCESS = """✅ <b>Оплата получена</b>
 
 💠 <b>PRIME PASS активирован.</b>
 
@@ -121,7 +122,7 @@ ROBOKASSA_SUCCESS = """✅ <b>Оплата получена</b>
 • быстрый скан
 • расширенные фильтры"""
 
-ROBOKASSA_FAIL = """⛔ <b>Оплата не завершена</b>
+PLATEGA_FAIL = """⛔ <b>Оплата не завершена</b>
 
 Попробуй ещё раз или выбери другой тариф."""
 
@@ -148,11 +149,13 @@ SUPPORT = """📡 <b>Связь с PRIME NICK</b>
 • сотрудничества
 
 Время ответа:
-12:00 — 00:00 МСК"""
+12:00 — 00:00 МСК
+
+Пиши по делу, если нужен быстрый и точный ответ."""
 
 PRIME_MENU = """💠 <b>PRIME PASS</b>
 
-Расширенный доступ к поиску редких Telegram username.
+Расширенный доступ к поиску редких Telegram username и к более сильной витрине результатов.
 
 Что входит:
 
@@ -162,6 +165,7 @@ PRIME_MENU = """💠 <b>PRIME PASS</b>
 🎛 расширенные фильтры
 📡 приоритетная связь
 🎟 доступ к промокодам и акциям
+🧪 расширенные возможности PRIME Lab
 
 Выбери способ оплаты:"""
 
@@ -177,6 +181,7 @@ def username_found(username: str) -> str:
 ╭─ <b>PRIME RESULT</b>
 │
 ├ username: @{h(raw)}
+├ редкость: <b>{h(rarity_line(raw))}</b>
 ├ telegram: t.me/{h(raw)}
 └ web: {h(raw)}.t.me
 │
@@ -239,20 +244,17 @@ def attempts_limit(time_left: str) -> str:
 
 
 def rules(settings: Settings) -> str:
-    user_agreement = (getattr(settings, "USER_AGREEMENT_LINK", "") or "https://telegra.ph/Polzovatelskoe-soglashenie-PRIME-NICK-05-27").strip()
-    privacy_policy = (getattr(settings, "PRIVACY_POLICY_LINK", "") or "https://telegra.ph/Politika-konfidencialnosti-PRIME-NICK-05-27").strip()
+    link = getattr(settings, "LEGAL_INFO_LINK", "") or "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
+    return f"""🗂 <b>Правовая информация PRIME NICK</b>
 
-    return f"""📄 <b>Документы PRIME NICK</b>
+Перед использованием сервиса ознакомься с документом:
 
-🔹 <b>Пользовательское соглашение:</b>
-{h(user_agreement)}
-
-🔹 <b>Политика конфиденциальности:</b>
-{h(privacy_policy)}"""
+• <b>Правовая информация, оплата и возврат</b>
+{h(link)}"""
 
 
-def robokassa_invoice(tariff: str, amount: int) -> str:
-    return f"""💳 <b>Оплата через СБП</b>
+def platega_invoice(tariff: str, amount: int) -> str:
+    return f"""💳 <b>Оплата через СБП / Platega</b>
 
 Тариф: <b>{tariff_title(tariff)}</b>
 Сумма: <b>{amount} ₽</b>
@@ -329,16 +331,30 @@ def reservation_released(username: str) -> str:
 
 @{h(raw)} снова может появляться в выдаче PRIME NICK."""
 
+
+def best_searches_text(searches: list) -> str:
+    if not searches:
+        return """🏆 <b>Мои лучшие находки</b>
+
+Пока тут пусто.
+Как только бот найдёт тебе удачные username, они появятся в этой подборке."""
+
+    lines = []
+    for idx, item in enumerate(searches[:8], start=1):
+        username = (item.username_result or "").lstrip("@")
+        lines.append(f"{idx}. @{h(username)} · {h(rarity_line(username))}")
+    return "🏆 <b>Мои лучшие находки</b>\n\n" + "\n".join(lines)
+
 CUSTOM_NICK_PROMPT = """✨ <b>Подбор по слову</b>
 
-Напиши, какой ник хочешь получить.
+Напиши основу, имя, бренд или слово, вокруг которого хочешь собрать username.
 Можно отправить имя, слово, @username или ссылку t.me.
 
-Я соберу до <b>5 красивых вариантов</b> и проверю их напрямую через Telegram."""
+Я соберу до <b>5 сильных вариантов</b> и проверю их напрямую через Telegram."""
 
 CUSTOM_NICK_GENERATING = """🧬 <b>Собираю варианты...</b>
 
-Делаю ник читаемым, красивым и проверяю доступность."""
+Собираю читаемые, сильные и визуально чистые варианты. Потом сразу проверяю доступность."""
 
 CUSTOM_NICK_BAD_INPUT = """⛔ <b>Не могу собрать ник</b>
 
@@ -357,7 +373,7 @@ def custom_nick_results(seed: str, usernames: list[str]) -> str:
 
 ╭─ <b>PRIME IDEAS</b>
 {joined}
-╰ Нажми на ник, чтобы открыть, или на 🧷, чтобы зарезервировать."""
+╰ Нажми на ник, чтобы открыть, или на 🧷, чтобы закрепить его за собой."""
 
 
 def custom_nick_not_found(seed: str) -> str:

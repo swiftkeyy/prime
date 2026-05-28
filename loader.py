@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 
 from config import Settings
 from database.session import create_engine, create_sessionmaker
-from handlers import admin, documents, errors, filters, menu, payments, prime, profile, promo, search, start, support
+from handlers import admin, discovery, documents, errors, filters, menu, payments, prime, profile, promo, search, start, support
 from middlewares.antiflood import AntiFloodMiddleware
 from middlewares.logging import LoggingMiddleware
 from middlewares.user_register import UserRegisterMiddleware
@@ -45,6 +45,7 @@ def create_runtime(settings: Settings):
     dp.include_router(start.router)
     dp.include_router(menu.router)
     dp.include_router(search.router)
+    dp.include_router(discovery.router)
     dp.include_router(filters.router)
     dp.include_router(profile.router)
     dp.include_router(prime.router)

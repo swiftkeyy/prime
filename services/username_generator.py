@@ -221,7 +221,16 @@ def generate_username(length: int, digits_enabled: bool, underscore_enabled: boo
         else:
             candidate = _word_like(length)
 
-        if digits_enabled or style_mode == "mixed":
+        if style_mode == "brutal":
+            candidate = candidate[:-1] + random.choice("xzvk")
+        elif style_mode == "soft":
+            candidate = re.sub(r"[xzq]", random.choice("lnr"), candidate)
+        elif style_mode == "brand" and length >= 6 and random.random() < 0.35:
+            candidate = random.choice(["neo", "nova", "lumi", "velo", "nord"] + WORD_BANK.get(length, []))[:length]
+        elif style_mode == "techno":
+            candidate = _maybe_leet(candidate, 0.45)
+
+        if digits_enabled or style_mode in {"mixed", "techno"}:
             if length == 5 and random.random() < 0.72:
                 candidate = _maybe_digit_suffix(candidate, length)
             else:

@@ -39,14 +39,14 @@ class Settings(BaseSettings):
 
     TELEGRAM_STARS_PROVIDER_TOKEN: str = ""
 
-    ROBOKASSA_LOGIN: str = ""
-    ROBOKASSA_PASSWORD_1: str = ""
-    ROBOKASSA_PASSWORD_2: str = ""
-    ROBOKASSA_TEST_MODE: bool = True
+    PLATEGA_BASE_URL: str = "https://app.platega.io"
+    PLATEGA_MERCHANT_ID: str = ""
+    PLATEGA_SECRET: str = ""
+    PLATEGA_PAYMENT_METHOD: int = 2
 
-    LEGAL_INFO_LINK: str = ""
-    USER_AGREEMENT_LINK: str = "https://telegra.ph/Polzovatelskoe-soglashenie-PRIME-NICK-05-27"
-    PRIVACY_POLICY_LINK: str = "https://telegra.ph/Politika-konfidencialnosti-PRIME-NICK-05-27"
+    LEGAL_INFO_LINK: str = "https://telegra.ph/Oplata-oferta-vozvrat-i-obrabotka-dannyh-PRIME-NICK-05-27"
+    USER_AGREEMENT_LINK: str = ""
+    PRIVACY_POLICY_LINK: str = ""
     PRIME_TERMS_LINK: str = ""
 
     USERNAME_CHECK_MODE: Literal["http", "mock", "fragment", "mtproto"] = "mtproto"
@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     USERNAME_STOCK_MIN_5: int = 10
     USERNAME_STOCK_MIN_6: int = 12
     USERNAME_STOCK_MIN_7: int = 12
+    DROP_ALERTS_ENABLED: bool = True
+    DROP_ALERTS_INTERVAL_SECONDS: int = 45
+    DROP_ALERTS_BATCH_SIZE: int = 12
+    DROP_ALERTS_USER_COOLDOWN_SECONDS: int = 900
+    DROP_ALERTS_DIGEST_SIZE: int = 3
 
     @field_validator("RAILWAY_PUBLIC_URL")
     @classmethod

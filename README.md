@@ -1,6 +1,6 @@
 # PRIME NICK
 
-Production-ready Telegram bot for searching available Telegram usernames with PRIME PASS, Telegram Stars, Robokassa/SBP, promo codes, referrals, admin panel, PostgreSQL, Redis, FastAPI webhook and Railway deployment.
+Production-ready Telegram bot for searching available Telegram usernames with PRIME PASS, Telegram Stars, Platega/SBP, promo codes, referrals, admin panel, PostgreSQL, Redis, FastAPI webhook and Railway deployment.
 
 ## Stack
 
@@ -11,7 +11,7 @@ Production-ready Telegram bot for searching available Telegram usernames with PR
 - Redis for FSM, antiflood and username cache
 - Alembic migrations
 - Telegram Stars
-- Robokassa Result URL
+- Platega callback
 - Railway webhook deployment
 
 ## Local start
@@ -93,25 +93,25 @@ The app sets webhook on startup:
 
 The webhook is protected with `WEBHOOK_SECRET` and Telegram header `X-Telegram-Bot-Api-Secret-Token`.
 
-## Robokassa settings
+## Platega settings
 
-Set URLs in Robokassa merchant settings:
+Set URLs in Platega merchant settings:
 
 ```text
-Result URL:  https://YOUR_DOMAIN/robokassa/result
-Success URL: https://YOUR_DOMAIN/robokassa/success
-Fail URL:    https://YOUR_DOMAIN/robokassa/fail
+Callback URL: https://YOUR_DOMAIN/platega/callback
+Success URL:  https://YOUR_DOMAIN/platega/success
+Fail URL:     https://YOUR_DOMAIN/platega/fail
 ```
 
-Use POST for Result URL. PRIME PASS is issued only after Result URL signature verification. Success URL is not trusted as payment confirmation.
+Укажи Callback URL в кабинете Platega: Settings → Callback URLs. PRIME PASS выдаётся только после callback со статусом CONFIRMED и проверкой X-MerchantId / X-Secret. Success URL не считается подтверждением оплаты.
 
 Secrets:
 
 ```env
-ROBOKASSA_LOGIN=
-ROBOKASSA_PASSWORD_1=
-ROBOKASSA_PASSWORD_2=
-ROBOKASSA_TEST_MODE=true
+PLATEGA_BASE_URL=https://app.platega.io
+PLATEGA_MERCHANT_ID=
+PLATEGA_SECRET=
+PLATEGA_PAYMENT_METHOD=2
 ```
 
 ## Telegram Stars
@@ -165,7 +165,7 @@ Features:
 - Use Alembic migrations, not `create_all`, in production.
 - Run behind HTTPS on Railway.
 - Keep `WEBHOOK_SECRET` random and private.
-- Robokassa Result URL is the only trusted confirmation source.
+- Platega callback is the only trusted confirmation source.
 
 ## PRIME ADMIN 2.0
 
@@ -223,7 +223,7 @@ API ID и API Hash создаются в Telegram на `my.telegram.org`.
 
 Можно менять цены отдельно для:
 
-- `СБП / Robokassa` — рубли;
+- `СБП / Platega` — рубли;
 - `Telegram Stars` — звёзды.
 
 Цены сохраняются в таблицу `settings` под ключами:
@@ -237,4 +237,4 @@ API ID и API Hash создаются в Telegram на `my.telegram.org`.
 - `PRIME_30_DAYS_PRICE_STARS`
 - `PRIME_FOREVER_PRICE_STARS`
 
-Если runtime-цена удалена или сломана, бот безопасно использует цену из `.env`. Уже созданные счета не меняются: сумма хранится в `payments.amount`, поэтому старые Robokassa/Stars платежи не ломаются.
+Если runtime-цена удалена или сломана, бот безопасно использует цену из `.env`. Уже созданные счета не меняются: сумма хранится в `payments.amount`, поэтому старые Platega/Stars платежи не ломаются.

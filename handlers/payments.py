@@ -9,12 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import Settings
 from database.models import User
 from database.queries import get_payment_by_invoice, mark_payment_paid
-from keyboards.payments import robokassa_pay
+from keyboards.payments import platega_pay
 from keyboards.prime import prime_success
-from services.payments.robokassa import build_payment_url, create_robokassa_payment
+from services.payments.platega import PlategaError, create_payment_link, create_platega_payment
 from services.payments.telegram_stars import create_stars_invoice, parse_stars_payload
 from services.prime_access import grant_prime
-from texts import PRIME_ACTIVATED, robokassa_invoice
+from texts import PRIME_ACTIVATED, platega_invoice
+from utils.telegram import safe_callback_answer, safe_edit_callback
 
 logger = logging.getLogger(__name__)
 router = Router(name="payments")
@@ -29,18 +30,28 @@ async def choose_tariff(
     settings: Settings,
 ) -> None:
     _, _, method, tariff = callback.data.split(":")
+    if method == "robokassa":
+        method = "platega"
     if method == "stars":
         await create_stars_invoice(bot, session, current_user, settings, tariff)
-        await callback.answer("Счёт отправлен")
+        await safe_callback_answer(callback, "Счёт отправлен")
         return
 
-    payment = await create_robokassa_payment(session, current_user, settings, tariff)
-    url = build_payment_url(settings, payment)
-    await callback.message.edit_text(
-        robokassa_invoice(tariff, int(payment.amount)),
-        reply_markup=robokassa_pay(url, tariff),
+    try:
+        payment = await create_platega_payment(session, current_user, settings, tariff)
+        url = await create_payment_link(settings, payment)
+    except PlategaError:
+        logger.exception("platega invoice creation failed")
+        await session.rollback()
+        await safe_callback_answer(callback, "⛔ Платёж временно недоступен", show_alert=True)
+        return
+
+    await safe_edit_callback(
+        callback,
+        platega_invoice(tariff, int(payment.amount)),
+        reply_markup=platega_pay(url, tariff),
     )
-    await callback.answer()
+    await safe_callback_answer(callback)
 
 
 @router.pre_checkout_query()

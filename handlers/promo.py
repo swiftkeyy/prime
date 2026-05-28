@@ -10,6 +10,7 @@ from database.models import User
 from keyboards.main import back_home
 from services.promo_codes import PromoActivationError, activate_promo
 from texts import PROMO_ERROR, PROMO_START, promo_success
+from utils.telegram import safe_callback_answer, safe_edit_callback
 
 router = Router(name="promo")
 
@@ -21,8 +22,8 @@ class PromoState(StatesGroup):
 @router.callback_query(F.data == "promo:start")
 async def promo_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(PromoState.waiting_code)
-    await callback.message.edit_text(PROMO_START, reply_markup=back_home())
-    await callback.answer()
+    await safe_edit_callback(callback, PROMO_START, reply_markup=back_home())
+    await safe_callback_answer(callback)
 
 
 @router.message(PromoState.waiting_code, F.text, ~F.text.startswith("/"))

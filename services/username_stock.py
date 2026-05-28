@@ -30,6 +30,10 @@ def _matches_filters(username: str, *, digits_enabled: bool, underscore_enabled:
     return True
 
 
+def _is_active_issue(item: UsernameStock, now) -> bool:
+    return item.status == "issued" and item.issued_until is not None and item.issued_until > now
+
+
 async def release_expired_stock_holds(session: AsyncSession) -> int:
     now = utcnow()
     result = await session.scalars(
@@ -100,6 +104,8 @@ async def take_available_username(
 
     for row in rows:
         username = row.username.lower().lstrip("@")
+        if row.issued_to_user_id == user.id and _is_active_issue(row, now):
+            continue
         if not is_valid_username(username):
             row.status = "rejected"
             continue
@@ -146,10 +152,20 @@ async def upsert_available_username(
         )
     else:
         item.length = len(username)
-        item.status = "available"
         item.source = source
         item.checked_at = now
         item.expires_at = expires_at
+
+        # Do not reopen usernames that are currently shown to a user or already
+        # blocked by a successful in-app reservation.
+        if _is_active_issue(item, now):
+            await session.flush()
+            return
+        if item.status == "reserved":
+            await session.flush()
+            return
+
+        item.status = "available"
         item.issued_to_user_id = None
         item.issued_until = None
     await session.flush()

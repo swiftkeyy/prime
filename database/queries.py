@@ -200,6 +200,16 @@ async def recent_payments(session: AsyncSession, limit: int = 10) -> list[Paymen
 async def all_user_telegram_ids(session: AsyncSession) -> list[int]:
     result = await session.scalars(select(User.telegram_id).order_by(User.id.asc()))
     return list(result)
+
+
+async def best_user_searches(session: AsyncSession, user: User, limit: int = 8) -> list[Search]:
+    result = await session.scalars(
+        select(Search)
+        .where(Search.user_id == user.id, Search.username_result.is_not(None))
+        .order_by(Search.created_at.desc(), Search.id.desc())
+        .limit(limit)
+    )
+    return list(result)
 # ─────────────────────────────────────────────────────────────────────────────
 # Admin center queries
 # ─────────────────────────────────────────────────────────────────────────────

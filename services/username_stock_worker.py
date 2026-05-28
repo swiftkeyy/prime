@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from config import Settings
+from services.drop_alerts import enqueue_drop_alert
 from services.username_checker import UsernameCheckerAdapter, UsernameCheckerNotConfigured, UsernameCheckerRateLimited, is_username_available
 from services.username_generator import generate_username
 from services.username_stock import count_available_stock, mark_username_rejected, release_expired_stock_holds, upsert_available_username
@@ -84,6 +85,7 @@ async def username_stock_worker(
                 if available:
                     await upsert_available_username(session, candidate, settings=settings, source="worker")
                     logger.info("Username stock added @%s length=%s", candidate, length)
+                    await enqueue_drop_alert(redis, candidate)
                 else:
                     await mark_username_rejected(session, candidate, source="worker")
                 await session.commit()

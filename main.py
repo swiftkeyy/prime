@@ -8,6 +8,7 @@ import uvicorn
 
 from config import get_settings
 from loader import create_runtime
+from services.drop_alerts import drop_alerts_worker
 from services.username_stock_worker import username_stock_worker
 from web.app import create_app
 
@@ -20,6 +21,7 @@ logger = logging.getLogger("prime_nick")
 settings = get_settings()
 bot, dp, redis, engine, sessionmaker, username_checker = create_runtime(settings)
 stock_worker_task: asyncio.Task | None = None
+drop_alerts_task: asyncio.Task | None = None
 app = create_app(
     bot=bot,
     dp=dp,
@@ -37,7 +39,7 @@ async def on_startup() -> None:
     if checker_start:
         await checker_start()
 
-    global stock_worker_task
+    global stock_worker_task, drop_alerts_task
     if settings.USERNAME_STOCK_ENABLED and settings.USERNAME_STOCK_WORKER_ENABLED:
         stock_worker_task = asyncio.create_task(
             username_stock_worker(
@@ -48,6 +50,10 @@ async def on_startup() -> None:
             )
         )
         logger.info("Username stock worker scheduled")
+
+    if settings.DROP_ALERTS_ENABLED:
+        drop_alerts_task = asyncio.create_task(drop_alerts_worker(bot, redis, settings))
+        logger.info("Drop alerts worker scheduled")
 
     await bot.set_webhook(
         settings.webhook_url,
@@ -60,11 +66,18 @@ async def on_startup() -> None:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    global stock_worker_task
+    global stock_worker_task, drop_alerts_task
     if stock_worker_task is not None:
         stock_worker_task.cancel()
         try:
             await stock_worker_task
+        except asyncio.CancelledError:
+            pass
+
+    if drop_alerts_task is not None:
+        drop_alerts_task.cancel()
+        try:
+            await drop_alerts_task
         except asyncio.CancelledError:
             pass
 

@@ -5,7 +5,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def prime_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="⭐ Telegram Stars", callback_data="prime:stars")
-    kb.button(text="💳 СБП / Robokassa", callback_data="prime:robokassa")
+    kb.button(text="💳 СБП / Platega", callback_data="prime:platega")
     kb.button(text="🎟 Активировать промокод", callback_data="promo:start")
     kb.button(text="↩️ В меню", callback_data="main:home")
     kb.adjust(1)

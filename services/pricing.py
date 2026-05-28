@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import Settings
 from database.models import Setting
 
-PaymentMethod = Literal["robokassa", "stars"]
+PaymentMethod = Literal["platega", "stars"]
 Tariff = Literal["1d", "7d", "30d", "forever"]
 
 TARIFFS: tuple[str, ...] = ("1d", "7d", "30d", "forever")
-METHODS: tuple[str, ...] = ("robokassa", "stars")
+METHODS: tuple[str, ...] = ("platega", "stars")
 
 RUB_KEYS = {
     "1d": "PRIME_1_DAY_PRICE_RUB",
@@ -30,12 +30,12 @@ STARS_KEYS = {
 }
 
 METHOD_TITLES = {
-    "robokassa": "СБП / Robokassa",
+    "platega": "СБП / Platega",
     "stars": "Telegram Stars",
 }
 
 METHOD_CURRENCIES = {
-    "robokassa": "₽",
+    "platega": "₽",
     "stars": "⭐",
 }
 
@@ -52,7 +52,7 @@ class PriceView:
 def price_key(method: str, tariff: str) -> str:
     if tariff not in TARIFFS:
         raise ValueError("unknown tariff")
-    if method == "robokassa":
+    if method == "platega":
         return RUB_KEYS[tariff]
     if method == "stars":
         return STARS_KEYS[tariff]
@@ -60,7 +60,7 @@ def price_key(method: str, tariff: str) -> str:
 
 
 def fallback_price(settings: Settings, method: str, tariff: str) -> int:
-    if method == "robokassa":
+    if method == "platega":
         return settings.rub_price(tariff)
     if method == "stars":
         return settings.stars_price(tariff)

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import Settings
-from database.models import ReservedUsername, User
+from database.models import ReservedUsername, User, UsernameStock
 from services.prime_access import is_prime_active
 from utils.time import utcnow
 from utils.validators import normalize_username
@@ -100,6 +100,11 @@ async def reserve_username(
         is_active=True,
     )
     session.add(item)
+    stock_item = await session.scalar(select(UsernameStock).where(UsernameStock.username == username.lower()))
+    if stock_item is not None:
+        stock_item.status = "reserved"
+        stock_item.issued_to_user_id = user.id
+        stock_item.issued_until = None
     await session.flush()
     return ReserveResult("reserved", item, used + 1, limit)
 

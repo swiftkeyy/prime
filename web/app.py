@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from web.robokassa_routes import router as robokassa_router
+from web.platega_routes import router as platega_router
 from web.telegram_webhook import router as telegram_router
 
 
@@ -17,7 +17,7 @@ def create_app(*, bot, dp, settings, sessionmaker, redis, engine, username_check
     app.state.username_checker = username_checker
 
     app.include_router(telegram_router)
-    app.include_router(robokassa_router)
+    app.include_router(platega_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

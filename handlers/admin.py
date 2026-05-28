@@ -154,12 +154,12 @@ def user_card_text(user: User) -> str:
 
 
 def price_amount_text(method: str, amount: int) -> str:
-    return f"{amount} ₽" if method == "robokassa" else f"{amount} ⭐"
+    return f"{amount} ₽" if method == "platega" else f"{amount} ⭐"
 
 
 def price_panel_text(views: list) -> str:
-    lines = ["💰 <b>PRIME PASS · Цены</b>", "", "Меняешь тут — сразу применяется в боте, инвойсах Stars и ссылках Robokassa.", ""]
-    for method in ("robokassa", "stars"):
+    lines = ["💰 <b>PRIME PASS · Цены</b>", "", "Меняешь тут — сразу применяется в боте, инвойсах Stars и ссылках Platega.", ""]
+    for method in ("platega", "stars"):
         lines.append(f"╭─ <b>{METHOD_TITLES[method]}</b>")
         for item in [v for v in views if v.method == method]:
             lines.append(
@@ -751,7 +751,7 @@ async def admin_prices(callback: CallbackQuery, session: AsyncSession, settings:
     await safe_edit(callback, price_panel_text(views), prices_menu())
 
 
-@router.callback_query(F.data.regexp(r"^admin:prices:(robokassa|stars)$"))
+@router.callback_query(F.data.regexp(r"^admin:prices:(platega|stars)$"))
 async def admin_prices_method(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
     if await deny(callback, settings):
         return
@@ -760,7 +760,7 @@ async def admin_prices_method(callback: CallbackQuery, session: AsyncSession, se
     await safe_edit(callback, price_method_text(method, prices), price_method_kb(method))
 
 
-@router.callback_query(F.data.regexp(r"^admin:price:set:(robokassa|stars):(1d|7d|30d|forever)$"))
+@router.callback_query(F.data.regexp(r"^admin:price:set:(platega|stars):(1d|7d|30d|forever)$"))
 async def admin_price_set_prompt(callback: CallbackQuery, state: FSMContext, session: AsyncSession, settings: Settings) -> None:
     if await deny(callback, settings):
         return
@@ -786,7 +786,7 @@ async def admin_price_set_save(message: Message, state: FSMContext, session: Asy
     data = await state.get_data()
     method = data.get("method")
     tariff = data.get("tariff")
-    if method not in {"robokassa", "stars"} or tariff not in set(TARIFFS):
+    if method not in {"platega", "stars"} or tariff not in set(TARIFFS):
         await state.clear()
         await message.answer("⛔ Контекст цены потерян. Открой админку и попробуй ещё раз.", reply_markup=prices_menu())
         return

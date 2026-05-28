@@ -6,6 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import Settings
 from texts import SUPPORT
+from utils.telegram import safe_callback_answer, safe_edit_callback
 
 router = Router(name="support")
 
@@ -18,5 +19,5 @@ async def support(callback: CallbackQuery, settings: Settings) -> None:
         kb.button(text="💬 Написать оператору", url=f"https://t.me/{support_username}")
     kb.button(text="↩️ В меню", callback_data="main:home")
     kb.adjust(1)
-    await callback.message.edit_text(SUPPORT, reply_markup=kb.as_markup())
-    await callback.answer()
+    await safe_edit_callback(callback, SUPPORT, reply_markup=kb.as_markup())
+    await safe_callback_answer(callback)
