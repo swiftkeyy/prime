@@ -39,7 +39,7 @@ async def choose_tariff(
 
     try:
         payment = await create_platega_payment(session, current_user, settings, tariff)
-        url = await create_payment_link(settings, payment)
+        url = await create_payment_link(settings, payment, session)
     except PlategaError:
         logger.exception("platega invoice creation failed")
         await session.rollback()

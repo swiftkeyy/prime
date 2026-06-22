@@ -22,7 +22,8 @@ class PlategaError(RuntimeError):
 
 
 def normalize_base_url(url: str) -> str:
-    return (url or "https://app.platega.io").rstrip("/")
+    stripped = (url or "").strip()
+    return (stripped or "https://app.platega.io").rstrip("/")
 
 
 def platega_headers(settings: Settings) -> dict[str, str]:
@@ -34,7 +35,7 @@ def platega_headers(settings: Settings) -> dict[str, str]:
 
 
 def validate_platega_settings(settings: Settings) -> None:
-    if not settings.PLATEGA_MERCHANT_ID or not settings.PLATEGA_SECRET:
+    if not (settings.PLATEGA_MERCHANT_ID or "").strip() or not (settings.PLATEGA_SECRET or "").strip():
         raise PlategaError("PLATEGA_MERCHANT_ID / PLATEGA_SECRET are not configured")
 
 
@@ -59,7 +60,7 @@ def build_fail_url(settings: Settings) -> str:
     return f"{settings.RAILWAY_PUBLIC_URL}/platega/fail"
 
 
-async def create_payment_link(settings: Settings, payment: Payment) -> str:
+async def create_payment_link(settings: Settings, payment: Payment, session: AsyncSession | None = None) -> str:
     """Create Platega transaction and return redirect URL.
 
     Platega creates transaction IDs itself, so we first create a local Payment,
@@ -114,7 +115,8 @@ async def create_payment_link(settings: Settings, payment: Payment) -> str:
     payment.status = str(data.get("status") or "pending").lower()
     if payment.status not in {"created", "pending"}:
         payment.status = "pending"
-    await session.flush()
+    if session is not None:
+        await session.flush()
     return redirect_url
 
 
@@ -134,8 +136,8 @@ def verify_callback_headers(settings: Settings, merchant_id: str | None, secret:
 
 
 def is_confirmed_status(status: str | None) -> bool:
-    return (status or "").upper() == "CONFIRMED"
+    return (status or "").strip().upper() == "CONFIRMED"
 
 
 def is_failed_status(status: str | None) -> bool:
-    return (status or "").upper() in {"CANCELED", "CANCELLED", "FAILED", "CHARGEBACKED"}
+    return (status or "").strip().upper() in {"CANCELED", "CANCELLED", "FAILED", "CHARGEBACKED"}
