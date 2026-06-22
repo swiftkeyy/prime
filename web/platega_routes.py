@@ -47,11 +47,11 @@ async def platega_callback(request: Request) -> str:
         if amount_raw is not None:
             try:
                 callback_amount = Decimal(str(amount_raw)).quantize(Decimal("0.01"))
+                expected_amount = Decimal(str(payment.amount)).quantize(Decimal("0.01"))
+                if callback_amount != expected_amount:
+                    logger.warning("platega amount mismatch transaction=%s got=%s expected=%s", transaction_id, callback_amount, expected_amount)
             except (InvalidOperation, ValueError):
-                raise HTTPException(status_code=400, detail="invalid amount") from None
-            if callback_amount != Decimal(str(payment.amount)).quantize(Decimal("0.01")):
-                logger.warning("platega amount mismatch transaction=%s got=%s expected=%s", transaction_id, callback_amount, payment.amount)
-                raise HTTPException(status_code=400, detail="amount mismatch")
+                logger.warning("platega invalid amount in callback transaction=%s amount_raw=%s", transaction_id, amount_raw)
 
         user = await payment.awaitable_attrs.user
         if is_confirmed_status(status):
