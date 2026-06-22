@@ -13,7 +13,6 @@ def profile_menu(ref_link: str) -> InlineKeyboardMarkup:
     kb.button(text="🧷 Мои резервы", callback_data="profile:reservations")
     kb.button(text="🏆 Мои лучшие находки", callback_data="profile:best")
     kb.button(text="📤 Пригласить друга", url=share_url)
-    kb.button(text="🔗 Открыть реф-ссылку", url=ref_link)
     kb.button(text="↩️ В меню", callback_data="main:home")
     kb.adjust(1)
     return kb.as_markup()
