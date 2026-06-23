@@ -483,14 +483,27 @@ async def admin_health(
 
 
 @router.callback_query(F.data == "admin:users")
-async def admin_users(callback: CallbackQuery, settings: Settings) -> None:
+async def admin_users(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
     if await deny(callback, settings):
         return
-    await safe_edit(
-        callback,
-        "👥 <b>PRIME USERS</b>\n\nВыбери сегмент. Каждая карточка открывается в один клик.",
-        users_menu(),
+    from sqlalchemy import select, func
+    from database.models import User as _User
+    from utils.time import utcnow as _utcnow
+    now = _utcnow()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    users_total = await session.scalar(select(func.count(_User.id))) or 0
+    users_today = await session.scalar(select(func.count(_User.id)).where(_User.created_at >= day_start)) or 0
+    prime_active = await session.scalar(
+        select(func.count(_User.id)).where(_User.is_prime.is_(True), _User.prime_until >= now)
+    ) or 0
+    text = (
+        f"👥 <b>PRIME USERS</b>\n\n"
+        f"╭─ <b>Всего:</b> <b>{users_total}</b>\n"
+        f"│ Сегодня: <b>+{users_today}</b>\n"
+        f"╰ PRIME active: <b>{prime_active}</b>\n\n"
+        f"Выбери сегмент. Каждая карточка открывается в один клик."
     )
+    await safe_edit(callback, text, users_menu())
 
 
 @router.callback_query(F.data.regexp(r"^admin:users:(latest|prime|top_searches|top_refs):(\d+)$"))
